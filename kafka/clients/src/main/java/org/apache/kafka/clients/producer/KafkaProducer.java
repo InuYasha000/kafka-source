@@ -294,6 +294,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
             //调用Metadata组件的方法，去broker上拉取了一次集群的元数据过来
             //后面每隔5分钟会默认刷新一次集群元数据，但是在发送消息的时候，如果没找到某个Topic的元数据，一定也会主动去拉取一次的
+            //关于cluster中的node其实就是broker
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
             //下面这两个组件就是网络通信的组件
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());

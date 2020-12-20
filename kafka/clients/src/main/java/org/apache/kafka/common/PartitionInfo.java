@@ -17,10 +17,15 @@ package org.apache.kafka.common;
  */
 public class PartitionInfo {
 
+    //哪个topic,topic名字
     private final String topic;
+    //分区号
     private final int partition;
+    //具体哪个Broker上的leader
     private final Node leader;
+    //分区副本--followers
     private final Node[] replicas;
+    //ISR列表
     private final Node[] inSyncReplicas;
 
     public PartitionInfo(String topic, int partition, Node leader, Node[] replicas, Node[] inSyncReplicas) {

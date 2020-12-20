@@ -164,10 +164,19 @@ public final class Metadata {
     /**
      * Update the cluster metadata
      */
+    /**
+     * 并没有立即去某一个broker上去拉取元数据的，但是对集群元数据做了一个初始化，
+     * 把你配置的那些broker地址转化为了Node，放在Cluster对象实例里
+     * @param cluster
+     * @param now
+     */
     public synchronized void update(Cluster cluster, long now) {
         this.needUpdate = false;
+        //最近一次刷新集群元数据时间
         this.lastRefreshMs = now;
+        //最近一次成功刷新集群元数据时间
         this.lastSuccessfulRefreshMs = now;
+        //集群元数据版本号
         this.version += 1;
 
         for (Listener listener: listeners)
@@ -176,6 +185,7 @@ public final class Metadata {
         // Do this after notifying listeners as subscribed topics' list can be changed by listeners
         this.cluster = this.needMetadataForAllTopics ? getClusterForCurrentTopics(cluster) : cluster;
 
+        // 唤醒awaitUpdate() 方法
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }

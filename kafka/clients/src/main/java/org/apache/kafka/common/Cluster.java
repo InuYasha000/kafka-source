@@ -27,15 +27,28 @@ import java.util.Set;
 /**
  * A representation of a subset of the nodes, topics, and partitions in the Kafka cluster.
  */
+
+/**
+ * 客户端
+ * 生产者（客户端），消费者（客户端），消息代理（Kafka本身）
+ */
 public final class Cluster {
 
     private final boolean isBootstrapConfigured;
+    //node就是broker
     private final List<Node> nodes;
+    //没有被授权访问的Topic的列表
     private final Set<String> unauthorizedTopics;
+    //topicPartition--topic分区号，topic名字
+    //PartitionInfo--分区具体信息
     private final Map<TopicPartition, PartitionInfo> partitionsByTopicPartition;
+    //每个topic有哪些分区
     private final Map<String, List<PartitionInfo>> partitionsByTopic;
+    //每个topic有哪些可用分区，某个分区没有leader存活，就代表分区不可用了
     private final Map<String, List<PartitionInfo>> availablePartitionsByTopic;
+    //每个broker上放了哪些分区
     private final Map<Integer, List<PartitionInfo>> partitionsByNode;
+    //BrokerId--Node
     private final Map<Integer, Node> nodesById;
 
     /**
