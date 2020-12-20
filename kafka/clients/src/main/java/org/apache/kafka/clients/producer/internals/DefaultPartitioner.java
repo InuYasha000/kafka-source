@@ -68,18 +68,24 @@ public class DefaultPartitioner implements Partitioner {
     public int partition(String topic, Object key, byte[] keyBytes, Object value, byte[] valueBytes, Cluster cluster) {
         List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
         int numPartitions = partitions.size();
+        //分区key为null
         if (keyBytes == null) {
+            // counter 初始值是随机数，接下来递增
             int nextValue = counter.getAndIncrement();
+            //可用分区
             List<PartitionInfo> availablePartitions = cluster.availablePartitionsForTopic(topic);
             if (availablePartitions.size() > 0) {
                 int part = DefaultPartitioner.toPositive(nextValue) % availablePartitions.size();
                 return availablePartitions.get(part).partition();
             } else {
                 // no partitions are available, give a non-available partition
+                //没有可用分区
                 return DefaultPartitioner.toPositive(nextValue) % numPartitions;
             }
         } else {
             // hash the keyBytes to choose a partition
+            //指定分区key
+            // Utils.murmur2(keyBytes) 将字节数组转化为hash值（32位int值），然后取模
             return DefaultPartitioner.toPositive(Utils.murmur2(keyBytes)) % numPartitions;
         }
     }

@@ -124,6 +124,7 @@ public final class Metadata {
         }
         long begin = System.currentTimeMillis();
         long remainingWaitMs = maxWaitMs;
+        //如果集群元数据更新了，此时 this.version 就会+1，判断version没有累加，说明元数据没有获取成功
         while (this.version <= lastVersion) {
             if (remainingWaitMs != 0)
                 wait(remainingWaitMs);
@@ -185,7 +186,7 @@ public final class Metadata {
         // Do this after notifying listeners as subscribed topics' list can be changed by listeners
         this.cluster = this.needMetadataForAllTopics ? getClusterForCurrentTopics(cluster) : cluster;
 
-        // 唤醒awaitUpdate() 方法
+        // 唤醒 awaitUpdate() 方法
         notifyAll();
         log.debug("Updated cluster metadata version {} to {}", this.version, this.cluster);
     }

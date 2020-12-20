@@ -111,13 +111,16 @@ public class Sender implements Runnable {
         this.client = client;
         this.accumulator = accumulator;
         this.metadata = metadata;
+        //是否保证消息顺序
         this.guaranteeMessageOrder = guaranteeMessageOrder;
+        //发送请求多大
         this.maxRequestSize = maxRequestSize;
         this.running = true;
         this.acks = acks;
         this.retries = retries;
         this.time = time;
         this.clientId = clientId;
+        //管理一些统计
         this.sensors = new SenderMetrics(metrics);
         this.requestTimeout = requestTimeout;
     }

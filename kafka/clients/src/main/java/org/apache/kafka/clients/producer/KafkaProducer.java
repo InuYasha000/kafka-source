@@ -258,6 +258,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG);
                 } else {
                     //缓冲区满了后的阻塞时间，默认60s
+                    //调用send方法后最多被阻塞的时间
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
                 }
             } else if (userProvidedConfigs.containsKey(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG)) {
@@ -298,6 +299,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
             //下面这两个组件就是网络通信的组件
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
+            //这个client是sender线程中去执行请求的组件
             NetworkClient client = new NetworkClient(
                     //一个网络连接最多空闲多长时间（9分钟）
                     new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),//nio网络相关 Selector
@@ -477,6 +479,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             // first make sure the metadata for the topic is available
             // 往topic发送消息，必须要知道topic元数据信息，这个topic有哪些分区，然后根据Partition组件选择一个分区
             //这里就是一个同步阻塞，获取到topic的元数据，这里就是真正获取topic元数据的地方
+            //在客户端已经缓存了这里返回0
             long waitedOnMetadataMs = waitOnMetadata(record.topic(), this.maxBlockTimeMs);
             //剩余可以阻塞时间，减去了获取元数据的时间
             long remainingWaitMs = Math.max(0, this.maxBlockTimeMs - waitedOnMetadataMs);
@@ -501,6 +504,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             //没有指定key--轮训
             //指定key---hash+取模
             int partition = partition(record, serializedKey, serializedValue, metadata.fetch());
+            //计算请求大小，这里需要计算自己的请求格式中别的字段大小
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
             //检查发送请求大小是否超过最大大小，以及内存缓冲大小
             ensureValidRecordSize(serializedSize);
@@ -563,6 +567,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         if (!this.metadata.containsTopic(topic))
             this.metadata.add(topic);
 
+        //partitionsByTopic
         if (metadata.fetch().partitionsForTopic(topic) != null)
             return 0;
 
@@ -571,7 +576,10 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         while (metadata.fetch().partitionsForTopic(topic) == null) {
             log.trace("Requesting metadata update for topic {}.", topic);
             int version = metadata.requestUpdate();
+            //唤醒Sender线程，就是本质上就是在让那个 Sender 线程去从 broker 拉取对应的 topic 的元数据
             sender.wakeup();
+            //唤醒后就会一直阻塞在这，等待 Sender 线程去从 broker 拉取对应的 topic 的元数据
+            // maxWaitMs = 60s
             metadata.awaitUpdate(version, remainingWaitMs);
             long elapsed = time.milliseconds() - begin;
             if (elapsed >= maxWaitMs)
@@ -587,12 +595,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Validate that the record size isn't too large
      */
     private void ensureValidRecordSize(int size) {
-        if (size > this.maxRequestSize)
+        if (size > this.maxRequestSize)//1MB
             throw new RecordTooLargeException("The message is " + size +
                                               " bytes when serialized which is larger than the maximum request size you have configured with the " +
                                               ProducerConfig.MAX_REQUEST_SIZE_CONFIG +
                                               " configuration.");
-        if (size > this.totalMemorySize)
+        if (size > this.totalMemorySize)//32MB
             throw new RecordTooLargeException("The message is " + size +
                                               " bytes when serialized which is larger than the total memory buffer you have configured with the " +
                                               ProducerConfig.BUFFER_MEMORY_CONFIG +
@@ -755,6 +763,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * calls configured partitioner class to compute the partition.
      */
     private int partition(ProducerRecord<K, V> record, byte[] serializedKey , byte[] serializedValue, Cluster cluster) {
+        //这里就是手动指定分区，基本上不会手动指定分区
         Integer partition = record.partition();
         if (partition != null) {
             List<PartitionInfo> partitions = cluster.partitionsForTopic(record.topic());

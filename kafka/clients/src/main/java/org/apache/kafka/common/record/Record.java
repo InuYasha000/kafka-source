@@ -185,6 +185,7 @@ public final class Record {
     }
 
     public static int recordSize(int keySize, int valueSize) {
+        // 4 + 1 + 1 + 8 + 4 + keySize + 4 + valueSize
         return CRC_LENGTH + MAGIC_LENGTH + ATTRIBUTE_LENGTH + TIMESTAMP_LENGTH + KEY_SIZE_LENGTH + keySize + VALUE_SIZE_LENGTH + valueSize;
     }
 

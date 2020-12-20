@@ -45,6 +45,10 @@ import java.util.Random;
  * <p>
  * This class is not thread-safe!
  */
+
+/**
+ * 发送网络异步io请求响应，非线程安全
+ */
 public class NetworkClient implements KafkaClient {
 
     private static final Logger log = LoggerFactory.getLogger(NetworkClient.class);
@@ -255,6 +259,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public List<ClientResponse> poll(long timeout, long now) {
+        // metadataUpdater 更新元数据
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
             this.selector.poll(Utils.min(timeout, metadataTimeout, requestTimeoutMs));
@@ -266,6 +271,7 @@ public class NetworkClient implements KafkaClient {
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
         handleCompletedSends(responses, updatedNow);
+        //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
         handleCompletedReceives(responses, updatedNow);
         handleDisconnections(responses, updatedNow);
         handleConnections();

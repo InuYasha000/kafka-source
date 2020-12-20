@@ -22,6 +22,9 @@ package org.apache.kafka.common.record;
  */
 public interface Records extends Iterable<LogEntry> {
 
+    // 一条消息对应到broker那儿是一条log，日志，会写入日志文件的，
+    // 每条日志开头都有一个size，代表了这个日志的大小，4个字节；
+    // 还会有offset，代表这个消息在日志文件里的offset偏移量，8个字节
     int SIZE_LENGTH = 4;
     int OFFSET_LENGTH = 8;
     int LOG_OVERHEAD = SIZE_LENGTH + OFFSET_LENGTH;

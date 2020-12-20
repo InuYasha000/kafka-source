@@ -18,6 +18,10 @@ import org.slf4j.LoggerFactory;
 /**
  * A wrapper for Thread that sets things up nicely
  */
+
+/**
+ * 真正执行逻辑的是Sender，这个KafkaThread就是一个壳，就是设置了下名字，还有设置为后台线程
+ */
 public class KafkaThread extends Thread {
 
     private final Logger log = LoggerFactory.getLogger(getClass());
