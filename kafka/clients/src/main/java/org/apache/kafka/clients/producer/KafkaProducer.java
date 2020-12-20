@@ -206,13 +206,18 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     private KafkaProducer(ProducerConfig config, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
         try {
             log.trace("Starting the Kafka producer");
+            //拿到我们设置的参数
             Map<String, Object> userProvidedConfigs = config.originals();
             this.producerConfig = config;
+            //kafka初始化时间
             this.time = new SystemTime();
 
+            //配置的client.id
             clientId = config.getString(ProducerConfig.CLIENT_ID_CONFIG);
+            //多个KafkaProducer的话，每个都默认会生成一个client.id，producer-自增长的数字，producer-1
             if (clientId.length() <= 0)
                 clientId = "producer-" + PRODUCER_CLIENT_ID_SEQUENCE.getAndIncrement();
+            //统计
             Map<String, String> metricTags = new LinkedHashMap<String, String>();
             metricTags.put("client-id", clientId);
             MetricConfig metricConfig = new MetricConfig().samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
@@ -222,10 +227,19 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
+            //核心组件，分区器，后面用来决定，你发送的每条消息是路由到Topic的哪个分区里去的
             this.partitioner = config.getConfiguredInstance(ProducerConfig.PARTITIONER_CLASS_CONFIG, Partitioner.class);
+            //生产端重试间隔,默认100ms
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
+            //元数据相关，用来从broker集群去拉取元数据的Topics（Topic -> Partitions（Leader+Followers，ISR））
+            //后续5分钟刷新一次元数据
+            //当发现发送topic不在本地，肯定通过这个元数据组件发送请求到broker来拉取topic元数据
+            //当前集群增加broker，也会涉及到元数据的变化
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG));
+            //每个请求的最大大小（1mb），对应很多batch，在broker也有请求大小的限制，但是跟这个没有关联
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            //缓冲区的内存大小（32mb），这个缓存区里面并不是所有内存都拿去缓存数据，还有一部分空间给了压缩用，还有一部分给了那些发送出去但是还没接收到响应的请求
+            //同时缓存区满了之后会阻塞一段时间，这个时间最大是 MAX_BLOCK_MS_CONFIG ，默认60s
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
             /* check for user defined settings.
@@ -243,6 +257,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                             "Please use " + ProducerConfig.MAX_BLOCK_MS_CONFIG);
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG);
                 } else {
+                    //缓冲区满了后的阻塞时间，默认60s
                     this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
                 }
             } else if (userProvidedConfigs.containsKey(ProducerConfig.METADATA_FETCH_TIMEOUT_CONFIG)) {
@@ -260,11 +275,15 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (userProvidedConfigs.containsKey(ProducerConfig.TIMEOUT_CONFIG)) {
                 log.warn(ProducerConfig.TIMEOUT_CONFIG + " config is deprecated and will be removed soon. Please use " +
                         ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+                //producer端发送请求超时时间，默认30s
                 this.requestTimeoutMs = config.getInt(ProducerConfig.TIMEOUT_CONFIG);
             } else {
                 this.requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
             }
 
+            //这个就是负责消息具体的缓冲机制，比如打包成batch
+            //bacth大小默认16KB，如果是0的话表示没有缓冲，直接发送，此时并发量很低
+            //lingerMs--指定时间间隔内都没凑出来一个batch，那么到了lingerMs这个时间后也会发出去
             this.accumulator = new RecordAccumulator(config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.totalMemorySize,
                     this.compressionType,
@@ -273,34 +292,49 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     metrics,
                     time);
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+            //调用Metadata组件的方法，去broker上拉取了一次集群的元数据过来
+            //后面每隔5分钟会默认刷新一次集群元数据，但是在发送消息的时候，如果没找到某个Topic的元数据，一定也会主动去拉取一次的
             this.metadata.update(Cluster.bootstrap(addresses), time.milliseconds());
+            //下面这两个组件就是网络通信的组件
             ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(config.values());
             NetworkClient client = new NetworkClient(
-                    new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),
+                    //一个网络连接最多空闲多长时间（9分钟）
+                    new Selector(config.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG), this.metrics, time, "producer", channelBuilder),//nio网络相关 Selector
                     this.metadata,
                     clientId,
+                    //发送了request，但是没有收到响应的这样的一个request数量，限制对同一个broker同一个链接发送的没有收到响应的request，默认5
+                    //如果发送了5个，但是最后又重试了，此时会有乱序问题
                     config.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION),
-                    config.getLong(ProducerConfig.RECONNECT_BACKOFF_MS_CONFIG),
-                    config.getInt(ProducerConfig.SEND_BUFFER_CONFIG),
-                    config.getInt(ProducerConfig.RECEIVE_BUFFER_CONFIG),
+                    config.getLong(ProducerConfig.RECONNECT_BACKOFF_MS_CONFIG),//重试连接的时间间隔（50ms）,跟一个broker建立连接失败，重新建立连接的时间间隔
+                    config.getInt(ProducerConfig.SEND_BUFFER_CONFIG),//Socket发送缓冲区大小（128kb）,这里是底层网络相关
+                    config.getInt(ProducerConfig.RECEIVE_BUFFER_CONFIG),//Socket接收缓冲区大小（32kb）
                     this.requestTimeoutMs, time);
+            //负责从缓冲区里获取消息发送到broker上去
             this.sender = new Sender(client,
                     this.metadata,
                     this.accumulator,
-                    config.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION) == 1,
+                    config.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION) == 1,//每个连接没收到响应的数量是否等于1
+                    //发送request请求最大大小，发送到每个分区的消息会被打包成batch，一个broker上的多个分区对应的多个batch会被打包成一个request，默认1M
                     config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG),
+                    //acks
+                    //--1，只要leader写入成功就认为成功,默认设置
+                    //--0，不会等待，发送给leader就OK了，也不会确认leader是否接受成功
+                    //--all/-1，会等待所有ISR列表中所有的partition都成功
                     (short) parseAcks(config.getString(ProducerConfig.ACKS_CONFIG)),
+                    //重试次数,默认1，最大 MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION （5）
                     config.getInt(ProducerConfig.RETRIES_CONFIG),
                     this.metrics,
                     new SystemTime(),
                     clientId,
-                    this.requestTimeoutMs);
+                    this.requestTimeoutMs);//producer端发送请求超时时间，默认30s
             String ioThreadName = "kafka-producer-network-thread" + (clientId.length() > 0 ? " | " + clientId : "");
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
+            //启动sender线程
             this.ioThread.start();
 
             this.errors = this.metrics.sensor("errors");
 
+            //序列化组件
             if (keySerializer == null) {
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
                         Serializer.class);
@@ -322,6 +356,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             userProvidedConfigs.put(ProducerConfig.CLIENT_ID_CONFIG, clientId);
             List<ProducerInterceptor<K, V>> interceptorList = (List) (new ProducerConfig(userProvidedConfigs)).getConfiguredInstances(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG,
                     ProducerInterceptor.class);
+            //拦截器
             this.interceptors = interceptorList.isEmpty() ? null : new ProducerInterceptors<>(interceptorList);
 
             config.logUnused();

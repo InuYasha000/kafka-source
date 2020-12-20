@@ -106,7 +106,9 @@ class RatPlugin implements Plugin<Project> {
       rat
     }
     project.repositories {
-      mavenCentral()
+//      mavenCentral()
+      maven { url 'https://maven.aliyun.com/repository/google/' }
+      maven { url 'https://maven.aliyun.com/repository/jcenter/'}
     }
     project.dependencies {
       rat 'org.apache.rat:apache-rat-tasks:0.11'

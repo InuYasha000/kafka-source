@@ -28,6 +28,7 @@ import java.security.Principal;
 
 import org.apache.kafka.common.utils.Utils;
 
+//网络通信相关
 public class KafkaChannel {
     private final String id;
     private final TransportLayer transportLayer;

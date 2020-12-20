@@ -17,7 +17,9 @@ import org.ajoberstar.grgit.Grgit
 
 buildscript {
   repositories {
-    mavenCentral()
+//    mavenCentral()
+    maven { url 'https://maven.aliyun.com/repository/google/' }
+    maven { url 'https://maven.aliyun.com/repository/jcenter/'}
     jcenter()
   }
   apply from: file('gradle/buildscript.gradle'), to: buildscript
@@ -36,7 +38,9 @@ allprojects {
   apply plugin: "jacoco"
 
   repositories {
-    mavenCentral()
+//    mavenCentral()
+    maven { url 'https://maven.aliyun.com/repository/google/' }
+    maven { url 'https://maven.aliyun.com/repository/jcenter/'}
   }
 
   apply plugin: 'com.github.ben-manes.versions'
