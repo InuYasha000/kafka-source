@@ -462,6 +462,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     @Override
     public Future<RecordMetadata> send(ProducerRecord<K, V> record, Callback callback) {
         // intercept the record, which can be potentially modified; this method does not throw exceptions
+        //自定义的拦截器
         ProducerRecord<K, V> interceptedRecord = this.interceptors == null ? record : this.interceptors.onSend(record);
         return doSend(interceptedRecord, callback);
     }
@@ -474,9 +475,13 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
         TopicPartition tp = null;
         try {
             // first make sure the metadata for the topic is available
+            // 往topic发送消息，必须要知道topic元数据信息，这个topic有哪些分区，然后根据Partition组件选择一个分区
+            //这里就是一个同步阻塞，获取到topic的元数据，这里就是真正获取topic元数据的地方
             long waitedOnMetadataMs = waitOnMetadata(record.topic(), this.maxBlockTimeMs);
+            //剩余可以阻塞时间，减去了获取元数据的时间
             long remainingWaitMs = Math.max(0, this.maxBlockTimeMs - waitedOnMetadataMs);
             byte[] serializedKey;
+            //序列化key和value，把各种类型的对象都序列化为字节数组
             try {
                 serializedKey = keySerializer.serialize(record.topic(), record.key());
             } catch (ClassCastException cce) {
@@ -492,17 +497,23 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer");
             }
+            //基于获取到的元数据，使用Partition组件来获取分区
+            //没有指定key--轮训
+            //指定key---hash+取模
             int partition = partition(record, serializedKey, serializedValue, metadata.fetch());
             int serializedSize = Records.LOG_OVERHEAD + Record.recordSize(serializedKey, serializedValue);
+            //检查发送请求大小是否超过最大大小，以及内存缓冲大小
             ensureValidRecordSize(serializedSize);
             tp = new TopicPartition(record.topic(), partition);
             long timestamp = record.timestamp() == null ? time.milliseconds() : record.timestamp();
             log.trace("Sending record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);
             // producer callback will make sure to call both 'callback' and interceptor callback
             Callback interceptCallback = this.interceptors == null ? callback : new InterceptorCallback<>(callback, this.interceptors, tp);
+            //RecordAccumulator组件负责消息
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey, serializedValue, interceptCallback, remainingWaitMs);
             if (result.batchIsFull || result.newBatchCreated) {
                 log.trace("Waking up the sender since topic {} partition {} is either full or getting a new batch", record.topic(), partition);
+                //如果某个分区batch满了或者创建一个新的batch，唤醒sender线程发送batch
                 this.sender.wakeup();
             }
             return result.future;
