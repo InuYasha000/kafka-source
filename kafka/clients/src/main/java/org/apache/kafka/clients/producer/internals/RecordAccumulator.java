@@ -68,7 +68,8 @@ public final class RecordAccumulator {
     private final long retryBackoffMs;
     private final BufferPool free;
     private final Time time;
-    // CopyOnWriteMap
+    // CopyOnWriteMap(自定义map) 非线程安全，内存map使用volatile，保证读高并发
+    //是只要有人更新了这个引用变量对应的实际的map对象的地址，就可以立即看到
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
@@ -170,9 +171,11 @@ public final class RecordAccumulator {
             // check if we have an in-progress batch
             //获取一个分区对应的Deque，这个Deque放了很多分区对应的batch
             Deque<RecordBatch> dq = getOrCreateDeque(tp);
+            //synchronized保证线程安全
             synchronized (dq) {
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
+                //将消息写入最近一个batch中（其实就是Deque的peekLast()）
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null)
                     return appendResult;
@@ -182,6 +185,7 @@ public final class RecordAccumulator {
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
             // 基于BufferPool（可以复用）给这个batch分配一块内存
+            //在这里的意思就是你的消息大小大于 batchSize（16KB） 就使用你的消息大小来分配内存，否则16KB
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
@@ -215,6 +219,7 @@ public final class RecordAccumulator {
      * resources (like compression streams buffers).
      */
     private RecordAppendResult tryAppend(long timestamp, byte[] key, byte[] value, Callback callback, Deque<RecordBatch> deque) {
+        //这里就保证了最近一个 RecordBatch
         RecordBatch last = deque.peekLast();
         if (last != null) {
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());

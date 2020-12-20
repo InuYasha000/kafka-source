@@ -83,6 +83,7 @@ public class CopyOnWriteMap<K, V> implements ConcurrentMap<K, V> {
     public synchronized V put(K k, V v) {
         Map<K, V> copy = new HashMap<K, V>(this.map);
         V prev = copy.put(k, v);
+        //副本
         this.map = Collections.unmodifiableMap(copy);
         return prev;
     }

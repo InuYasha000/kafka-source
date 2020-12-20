@@ -96,21 +96,27 @@ public final class BufferPool {
                                                + this.totalMemory
                                                + " on memory allocations.");
 
+        //ReentrantLock可以灵活的使用api释放锁和加锁
         this.lock.lock();
         try {
             // check if we have a free buffer of the right size pooled
+            //这里就是BufferPool有一个Deque队列来缓存了一些ByteBuffer，也就是缓存一批内存空间，可以用来复用
             if (size == poolableSize && !this.free.isEmpty())
                 return this.free.pollFirst();
 
             // now check if the request is immediately satisfiable with the
             // memory on hand or if we need to block
+            // 缓存在BufferPool的Deque中的内存空间大小
             int freeListSize = this.free.size() * this.poolableSize;
+            //availableMemory 剩余可用空间大小，这里就是当前内存空间（剩余内存空间+缓存起来的内存空间）还可以分配新的ByteBuffer
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
                 freeUp(size);
+                //从剩余空间减去size
                 this.availableMemory -= size;
                 lock.unlock();
+                //返回需要内存大小的BufferPool
                 return ByteBuffer.allocate(size);
             } else {
                 // we are out of memory and will have to block
