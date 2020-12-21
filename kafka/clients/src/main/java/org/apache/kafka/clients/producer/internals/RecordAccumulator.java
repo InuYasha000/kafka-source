@@ -182,6 +182,7 @@ public final class RecordAccumulator {
                     return appendResult;
             }
 
+            //下面这些逻辑其实就上面逻辑没走进去，也就是这个分区对应的最新的一个batch写满了，因此新建一个batch
             // we don't have an in-progress record batch try to allocate a new batch
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
@@ -230,6 +231,7 @@ public final class RecordAccumulator {
         //这里就保证了最近一个 RecordBatch
         RecordBatch last = deque.peekLast();
         if (last != null) {
+            //队列中存在batch，追加到这个batch，否则下面返回null，在外面会新建一个batch
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());
             //返回null表示没有空间
             if (future == null)
