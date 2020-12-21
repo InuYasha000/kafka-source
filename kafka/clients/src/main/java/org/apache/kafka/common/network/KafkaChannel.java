@@ -30,11 +30,15 @@ import org.apache.kafka.common.utils.Utils;
 
 //网络通信相关
 public class KafkaChannel {
+    //broker id，一个Broker id对应一个网络连接，一个网络连接对应一个 KafkaChannel ，底层对应SocketChannel ，SocketChannel对应最底层的 Socket ，对应一个 TCP 连接，底层就是套接字通信
     private final String id;
+    //封装了底层的java NIO 的 SocketChannel
     private final TransportLayer transportLayer;
     private final Authenticator authenticator;
     private final int maxReceiveSize;
+    //这个Channel读取出来的最近一个响应，也是会被不断被覆盖
     private NetworkReceive receive;
+    //交给底层的Channel要发送的最近一个请求，会不断的被覆盖
     private Send send;
 
     public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize) throws IOException {

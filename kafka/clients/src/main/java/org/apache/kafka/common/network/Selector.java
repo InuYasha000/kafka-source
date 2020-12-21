@@ -75,6 +75,20 @@ import org.slf4j.LoggerFactory;
  *
  * This class is not thread safe!
  */
+
+/**
+ * 针对多个Broker的网络连接，执行非阻塞的IO操作
+ *
+ * 这个类用于网络发送和网络接受固定大小的请求和响应
+ *
+ * 调用Selector的connect方法，传入Broker的id，host和port，就可以建立起网络连接（这里也就是Channel），Channel会被注册到NioSelector
+ *
+ * 连接的时候不会阻塞，是基于非阻塞，多路复用，connect方法只是做了连接的初始化，并不代表说这个方法执行完后连接就建立起来，这个只是尝试去建立连接
+ *
+ * 发送请求，接受响应，基于 poll 方法
+ *
+ * 非线程安全
+ */
 public class Selector implements Selectable {
 
     private static final Logger log = LoggerFactory.getLogger(Selector.class);
@@ -110,19 +124,30 @@ public class Selector implements Selectable {
         } catch (IOException e) {
             throw new KafkaException(e);
         }
+        //最大可以接收的数据量的大小，默认-1
         this.maxReceiveSize = maxReceiveSize;
+        //连接最大可以空闲时间，否则回收
         this.connectionsMaxIdleNanos = connectionMaxIdleMs * 1000 * 1000;
         this.time = time;
         this.metricGrpPrefix = metricGrpPrefix;
         this.metricTags = metricTags;
+        //保存了 brokerId（key） 到 channel（value） 的关系，每个Broker都有一个网络连接
         this.channels = new HashMap<>();
+        //已经发送成功的请求
         this.completedSends = new ArrayList<>();
+        //已经接受回来的响应而且被处理完了
         this.completedReceives = new ArrayList<>();
+        //每个Broker收到的但是还没有被处理的响应
         this.stagedReceives = new HashMap<>();
+        //立马就建立好的 SelectionKey
         this.immediatelyConnectedKeys = new HashSet<>();
+        //已经成功建立连接的brokers
         this.connected = new ArrayList<>();
+        //没有成功建立连接的brokers
         this.disconnected = new ArrayList<>();
+        //发送请求失败的brokers
         this.failedSends = new ArrayList<>();
+        //统计相关
         this.sensors = new SelectorMetrics(metrics);
         this.channelBuilder = channelBuilder;
         // initial capacity and load factor are default, we set them explicitly because we want to set accessOrder = true
@@ -149,6 +174,14 @@ public class Selector implements Selectable {
      * @throws IllegalStateException if there is already a connection for that id
      * @throws IOException if DNS resolution fails on the hostname or if the broker is down
      */
+    /**
+     * 这个方法只是对连接做了初始化，在{@link #poll(long)}方法中完成连接，{@link #connected()}方法检查连接是否建立
+     * @param id The id for this connection
+     * @param address The address to connect to
+     * @param sendBufferSize The send buffer for the socket
+     * @param receiveBufferSize The receive buffer for the socket
+     * @throws IOException
+     */
     @Override
     public void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException {
         if (this.channels.containsKey(id))
@@ -157,14 +190,22 @@ public class Selector implements Selectable {
         SocketChannel socketChannel = SocketChannel.open();
         socketChannel.configureBlocking(false);
         Socket socket = socketChannel.socket();
+        //避免双方建立连接了，但是一方断开了但都不知道，因此2小时内没有任何通信的话，就发送一个探测包，根据探测包的结果保持连接、重新连接或者断开连接
         socket.setKeepAlive(true);
+        //Socket发送和接收的缓冲区大小，不能是-1，分别是128KB和32KB
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+        //设置成false，开启一个Nagle算法，把网络通信中小的数据包收集起来组装成一个大的数据包，如果大量的小包在传递的话，就会导致网络阻塞
+        //true代表不开启Nagle算法，让你发送的数据包立马通过网络传输过去
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            //前面被设置成非阻塞，那么对这个connect的调用会初始化一个非阻塞的连接请求，
+            //如果这个连接马上就成功了，会马上返回true，否则的话，只要不是这种立马连接成功的话，
+            //需要在后面调用 SocketChannel 的 finishConnect 方法，去完成最终的连接
+            //阻塞模式的话，会一直阻塞在这里，直到连接成功
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -173,9 +214,12 @@ public class Selector implements Selectable {
             socketChannel.close();
             throw e;
         }
+        //直接就把这个 SocketChannel 给注册到 Selector 上去了，让 Selector 监视这个 SocketChannel 的 OP_CONNECT 事件，
+        //就是是否有人同意跟他建立连接，会获取到一个 SelectionKey
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
         key.attach(channel);
+        //放入brokerid和KafkaChannel
         this.channels.put(id, channel);
 
         if (connected) {

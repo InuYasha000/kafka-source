@@ -150,16 +150,27 @@ public class NetworkClient implements KafkaClient {
      * @param now The current timestamp
      * @return True if we are ready to send to the given node
      */
+    /**
+     * 判断是否和给定的node建立连接
+     * @param node The node to connect to.
+     * @param now The current time
+     * @return
+     */
     @Override
     public boolean ready(Node node, long now) {
         if (node.isEmpty())
             throw new IllegalArgumentException("Cannot connect to empty node " + node);
 
+        //具体判断是否已经建立好连接
         if (isReady(node, now))
             return true;
 
+        //首先检查是否可以建立连接
+        //连接状态是null：说明之前没有建立过连接，返回true；
+        //不是null，说明之前建立过连接但是断开了，此时判断是否超过超时时间，这样可以重连
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            //建立连接
             initiateConnect(node, now);
 
         return false;
@@ -500,11 +511,13 @@ public class NetworkClient implements KafkaClient {
         String nodeConnectionId = node.idString();
         try {
             log.debug("Initiating connection to node {} at {}:{}.", node.id(), node.host(), node.port());
+            //设置连接状态，状态机模式
             this.connectionStates.connecting(nodeConnectionId, now);
+            //Socket连接，发送请求和接收请求都是Socket，因此Socket的发送和接收的缓冲区两个参数必须要设置
             selector.connect(nodeConnectionId,
                              new InetSocketAddress(node.host(), node.port()),
-                             this.socketSendBuffer,
-                             this.socketReceiveBuffer);
+                             this.socketSendBuffer, //默认128KB
+                             this.socketReceiveBuffer); //默认32KB
         } catch (IOException e) {
             /* attempt failed, we'll try again after the backoff */
             connectionStates.disconnected(nodeConnectionId, now);
@@ -538,6 +551,8 @@ public class NetworkClient implements KafkaClient {
 
         @Override
         public boolean isUpdateDue(long now) {
+            // 当前不能处于元数据加载的过程 && 下一次要更新元数据的间隔时间为0
+            // 也就是 现在没有加载元数据，但是马上就应该要加载元数据了
             return !this.metadataFetchInProgress && this.metadata.timeToNextUpdate(now) == 0;
         }
 
