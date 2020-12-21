@@ -59,6 +59,7 @@ public final class RecordAccumulator {
 
     private static final Logger log = LoggerFactory.getLogger(RecordAccumulator.class);
 
+    //客户端状态
     private volatile boolean closed;
     private final AtomicInteger flushesInProgress;
     private final AtomicInteger appendsInProgress;
@@ -186,22 +187,29 @@ public final class RecordAccumulator {
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
             // 基于BufferPool（可以复用）给这个batch分配一块内存
             //在这里的意思就是你的消息大小大于 batchSize（16KB） 就使用你的消息大小来分配内存，否则16KB
+            //这个方法中是线程安全的，但是多个线程过来，各个线程都能拿到属于自己的ByteBuffer
             ByteBuffer buffer = free.allocate(size, maxTimeToBlock);
             synchronized (dq) {
                 // Need to check if producer is closed again after grabbing the dequeue lock.
                 if (closed)
                     throw new IllegalStateException("Cannot send after the producer is closed.");
 
-                //此时已经分配了内存，再次尝试写入Deque
+                //此时已经分配了内存，再次尝试写入Deque，这里就是Double-check
+                //这个方法就是把消息尝试写入Deque的最近一个batch中，多线程用synchronized保证
+                // 很多个线程在都拿到各自的ByteBuffer后进入这个方法线程安全，一次只能有一个线程进来
+                // 第一个线程过来了就保证dq不为空，此时后面的线程直接用这个dq
+                //也就是复用，那么此时后面线程拿到的ByteBuffer就会释放
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
+                    //这里就是上面写的释放内存
                     free.deallocate(buffer);
                     return appendResult;
                 }
                 MemoryRecords records = MemoryRecords.emptyRecords(buffer, compression, this.batchSize);
-                //这里就是消息放入batch
+                //这里就是消息放入batch（指定了分区）
                 RecordBatch batch = new RecordBatch(tp, records, time.milliseconds());
+                //消息写入 MemoryRecords ，在这里有一条消息最后按照二进制协议写入Batch的ByteBuffer
                 FutureRecordMetadata future = Utils.notNull(batch.tryAppend(timestamp, key, value, callback, time.milliseconds()));
 
                 //batch放入Deque
@@ -223,6 +231,7 @@ public final class RecordAccumulator {
         RecordBatch last = deque.peekLast();
         if (last != null) {
             FutureRecordMetadata future = last.tryAppend(timestamp, key, value, callback, time.milliseconds());
+            //返回null表示没有空间
             if (future == null)
                 last.records.close();
             else
@@ -313,6 +322,7 @@ public final class RecordAccumulator {
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         boolean unknownLeadersExist = false;
 
+        //是否有人正在等待分配内存（表示内存已经耗尽）
         boolean exhausted = this.free.queued() > 0;
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
@@ -320,24 +330,36 @@ public final class RecordAccumulator {
 
             Node leader = cluster.leaderFor(part);
             if (leader == null) {
+                //表示不知道leader是谁，在这里设置一个标志位，在后面会进行一个元数据的拉取
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
-                synchronized (deque) {
+                synchronized (deque) {//读取deque加锁
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        //是否需要重试， 参数含义：是否重试 && 上次重试时间 + 重试间隔(100ms) > 当前时间
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
+                        // lastAttemptMs 如果 batch 没有重试过，在这里就是创建时间，因此 waitedTimeMs 表示batch创建到现在的时间
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
+                        //batch最多等待多久就要被发送，如果重试过就代表重试间隔，没有重试过就是 linger.ms 参数
+                        //在这里需要注意的是 linger.ms 参数是0的话，在下面 expired 会永远为 true ，就代表batch需要创建出来就发送，这个参数就失去了意义
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        //上面两个时间相减后的剩余时间
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
+                        //判断当前batch是否已满，逻辑是：deque数量超过1表示 peekFirst 出来的肯定是一个满的batch || 哪怕只有一个但是 batch.records.isFull() 判断达到16K，也是已满
                         boolean full = deque.size() > 1 || batch.records.isFull();
+                        //batch是否超时，超时逻辑就是上面的 重试间隔 和 linger.ms
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+                        //是否需要发送出去 = 已满 || 已超时 || 内存已耗尽 || 当前客户端需要关闭掉 || 当前强制需要把数据flush到网络
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
                         if (sendable && !backingOff) {
-                            readyNodes.add(leader);
+                            readyNodes.add(leader);//在这里是找的Node，也就是Broker可以发送数据
                         } else {
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough
                             // since we'll just wake up and then sleep again for the remaining time.
+                            //这个参数这样理解， linger.ms 为100ms，但是这里判断后batch还没到发送条件，
+                            // 因此这里会取一个最小的剩余等待时间，这个最小来自于多个batch的比较，因为这里是在循环batch
+                            //这个参数就是指：在循环的batch中，最快可以发送的那个batch的还需等待时间
                             nextReadyCheckDelayMs = Math.min(timeLeftMs, nextReadyCheckDelayMs);
                         }
                     }

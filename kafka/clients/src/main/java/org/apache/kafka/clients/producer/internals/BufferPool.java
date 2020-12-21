@@ -47,6 +47,7 @@ public final class BufferPool {
     private final int poolableSize;
     private final ReentrantLock lock;
     private final Deque<ByteBuffer> free;
+    //内存耗尽时，当前正在等待分配内存的condition
     private final Deque<Condition> waiters;
     private long availableMemory;
     private final Metrics metrics;

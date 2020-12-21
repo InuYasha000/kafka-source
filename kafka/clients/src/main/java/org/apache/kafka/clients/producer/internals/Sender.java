@@ -173,19 +173,25 @@ public class Sender implements Runnable {
      *            The current POSIX time in milliseconds
      */
     void run(long now) {
+        //这里的cluster包括topic-partition-Leader/Follower-ISR
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
+        //获取可以发送消息的partition（写满batch-16KB，或者创建时间超过linger.ms）
+        //这个result中包含了leader broker
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
+        //有些partition元数据没有拉取到，必须标识一下，在后面拉取元数据
         if (result.unknownLeadersExist)
             this.metadata.requestUpdate();
 
         // remove any nodes we aren't ready to send to
+        //遍历leader broker
         Iterator<Node> iter = result.readyNodes.iterator();
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            //是否准备好向这些leader broker可以发送消息了，也就是是否已经建立了链接
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
@@ -193,6 +199,7 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
+        //有很多partition可以发送信息，在这里就是根据broker对partition进行分组，分成一个broker对应多个partition
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,
@@ -205,12 +212,14 @@ public class Sender implements Runnable {
             }
         }
 
+        //batch在内存中超过60s就超时不要了，不发送了
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)
             this.sensors.recordErrors(expiredBatch.topicPartition.topic(), expiredBatch.recordCount);
 
         sensors.updateProduceRequestMetrics(batches);
+        //对每个broker创建clientRequest（这个broker上多个partition上对应的batch）
         List<ClientRequest> requests = createProduceRequests(batches, now);
         // If we have any nodes that are ready to send + have sendable data, poll with 0 timeout so this can immediately
         // loop and try sending more data. Otherwise, the timeout is determined by nodes that have partitions with data
@@ -222,6 +231,7 @@ public class Sender implements Runnable {
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
+        //NetWorkClient发送请求
         for (ClientRequest request : requests)
             client.send(request, now);
 
