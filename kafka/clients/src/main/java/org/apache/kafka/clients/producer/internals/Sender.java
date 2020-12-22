@@ -284,6 +284,7 @@ public class Sender implements Runnable {
                     ProduceResponse.PartitionResponse partResp = entry.getValue();
                     Errors error = Errors.forCode(partResp.errorCode);
                     RecordBatch batch = batches.get(tp);
+                    //这里会去执行我们自定义的逻辑，同时还会释放内存空间
                     completeBatch(batch, error, partResp.baseOffset, partResp.timestamp, correlationId, now);
                 }
                 this.sensors.recordLatency(response.request().request().destination(), response.requestLatencyMs());
@@ -325,7 +326,9 @@ public class Sender implements Runnable {
             else
                 exception = error.exception();
             // tell the user the result of their request
+            //这里就是调用我们自己的回调逻辑
             batch.done(baseOffset, timestamp, exception);
+            //batch释放内存
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
@@ -341,6 +344,7 @@ public class Sender implements Runnable {
      * We can retry a send if the error is transient and the number of attempts taken is fewer than the maximum allowed
      */
     private boolean canRetry(RecordBatch batch, Errors error) {
+        //重试次数小于设置数并且异常是可以重试的异常
         return batch.attempts < this.retries && error.exception() instanceof RetriableException;
     }
 

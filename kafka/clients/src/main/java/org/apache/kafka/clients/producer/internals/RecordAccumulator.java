@@ -72,6 +72,7 @@ public final class RecordAccumulator {
     // CopyOnWriteMap(自定义map) 非线程安全，内存map使用volatile，保证读高并发
     //是只要有人更新了这个引用变量对应的实际的map对象的地址，就可以立即看到
     private final ConcurrentMap<TopicPartition, Deque<RecordBatch>> batches;
+    //还没完成的batch，成功后会删掉
     private final IncompleteRecordBatches incomplete;
     // The following variables are only accessed by the sender thread, so we don't need to protect them.
     private final Set<TopicPartition> muted;
@@ -265,10 +266,12 @@ public final class RecordAccumulator {
                         RecordBatch batch = batchIterator.next();
                         boolean isFull = batch != lastBatch || batch.records.isFull();
                         // check if the batch is expired
+                        //判断batch中最后一条是否超时
                         if (batch.maybeExpire(requestTimeout, retryBackoffMs, now, this.lingerMs, isFull)) {
                             expiredBatches.add(batch);
                             count++;
                             batchIterator.remove();
+                            //超时也会释放资源
                             deallocate(batch);
                         } else {
                             // Stop at the first batch that has not expired.
@@ -287,6 +290,9 @@ public final class RecordAccumulator {
     /**
      * Re-enqueue the given record batch in the accumulator to retry
      */
+    /**
+     * 重新入队
+     */
     public void reenqueue(RecordBatch batch, long now) {
         batch.attempts++;
         batch.lastAttemptMs = now;
@@ -294,6 +300,7 @@ public final class RecordAccumulator {
         batch.setRetry();
         Deque<RecordBatch> deque = getOrCreateDeque(batch.topicPartition);
         synchronized (deque) {
+            //加入到头部，不是尾部，这样重试加入的优先被处理
             deque.addFirst(batch);
         }
     }
@@ -339,6 +346,7 @@ public final class RecordAccumulator {
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
                         //是否需要重试， 参数含义：是否重试 && 上次重试时间 + 重试间隔(100ms) > 当前时间
+                        //后续出错需要重试的时间，这些参数都会被设置
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
                         // lastAttemptMs 如果 batch 没有重试过，在这里就是创建时间，因此 waitedTimeMs 表示batch创建到现在的时间
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
