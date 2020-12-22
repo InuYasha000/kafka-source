@@ -368,6 +368,9 @@ public class Selector implements Selectable {
                     channel.prepare();
 
                 /* if channel is ready read from any connections that have readable data */
+                //如果broker返回响应了就会感知到一个OP_READ事件，在这里会使用while循环，
+                //因为broker会发送多个请求但可能都没有收到响应，因此响应会有多个，所以要不停的读
+                //最后放到 stagedReceives ，暂存一下，表示接收到但是还没有处理的请求
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
                     while ((networkReceive = channel.read()) != null)

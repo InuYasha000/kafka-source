@@ -166,6 +166,7 @@ public class NetworkClient implements KafkaClient {
             throw new IllegalArgumentException("Cannot connect to empty node " + node);
 
         //具体判断是否已经建立好连接
+        //这里其实还包括上一次请求是否发送完毕的判断，判断依据是 ByteBufferSend.remaining ，这个可以见 ByteBufferSend.writeTo() 方法
         if (isReady(node, now))
             return true;
 
@@ -290,7 +291,7 @@ public class NetworkClient implements KafkaClient {
         //完成发送
         handleCompletedSends(responses, updatedNow);
         //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
-        //完成接受
+        //完成接收
         handleCompletedReceives(responses, updatedNow);
         //断开连接
         handleDisconnections(responses, updatedNow);
@@ -483,7 +484,9 @@ public class NetworkClient implements KafkaClient {
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         for (NetworkReceive receive : this.selector.completedReceives()) {
             String source = receive.source();
+            //从 inFlightRequests 中移除一个request，腾出来一个位置，
             ClientRequest req = inFlightRequests.completeNext(source);
+            //解析返回回来的按照一定规范的二进制协议数组
             Struct body = parseResponse(receive.payload(), req.request().header());
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
                 responses.add(new ClientResponse(req, now, false, body));

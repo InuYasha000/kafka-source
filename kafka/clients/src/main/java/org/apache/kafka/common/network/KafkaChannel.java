@@ -141,7 +141,7 @@ public class KafkaChannel {
         }
 
         receive(receive);
-        if (receive.complete()) {
+        if (receive.complete()) {//是否读完了
             receive.payload().rewind();
             result = receive;
             receive = null;
@@ -151,6 +151,7 @@ public class KafkaChannel {
 
     public Send write() throws IOException {
         Send result = null;
+        //倘若在这里send(send) 返回false也就是一次发送没有发送完，那么result=null，此时send并没有设为null，会影响 NetworkClient.ready() 方法判断逻辑
         if (send != null && send(send)) {
             result = send;
             send = null;//在这里设置为了null，在前面是有判断send是否为null来判断当前是否有请求没有发送出去
@@ -166,6 +167,7 @@ public class KafkaChannel {
         send.writeTo(transportLayer);
         //发送完毕，取消 OP_WRITE 事件
         //位运算符 & ~ 就是取消关注
+        //这里其实是判断发送是否完毕，因为可能存在ByteBuffer中的二进制字节数据一次write没有全部发送完毕
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 

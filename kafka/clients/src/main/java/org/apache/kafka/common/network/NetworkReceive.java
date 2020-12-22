@@ -41,6 +41,7 @@ public class NetworkReceive implements Receive {
 
     public NetworkReceive(String source) {
         this.source = source;
+        //这里就是解决粘包拆包关键
         this.size = ByteBuffer.allocate(4);
         this.buffer = null;
         this.maxSize = UNLIMITED;
@@ -77,23 +78,30 @@ public class NetworkReceive implements Receive {
     @Deprecated
     public long readFromReadableChannel(ReadableByteChannel channel) throws IOException {
         int read = 0;
+        //
         if (size.hasRemaining()) {
+            //读取的本质在这，其实就是 SocketChannel.read() ;
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
             if (!size.hasRemaining()) {
+                //rewind将position重置为0，此时就可以从ByteBuffer里读取数据了
                 size.rewind();
+                //size.getInt() 默认从ByteBuffer当前position的位置获取4个字节，转换为一个int类型的数字返回给你
+                // receiveSize 就代表响应消息大小
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
                 if (maxSize != UNLIMITED && receiveSize > maxSize)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + " larger than " + maxSize + ")");
 
+                //然后分配响应消息大小的一个 buffer ，用这个 buffer 去读取
                 this.buffer = ByteBuffer.allocate(receiveSize);
             }
         }
         if (buffer != null) {
+            //在这里就是读取，这个 buffer 的字节数和下一条的字节数一模一样
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)
                 throw new EOFException();

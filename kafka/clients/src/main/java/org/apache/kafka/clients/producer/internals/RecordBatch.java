@@ -104,6 +104,7 @@ public final class RecordBatch {
                                                                  thunk.future.checksum(),
                                                                  thunk.future.serializedKeySize(),
                                                                  thunk.future.serializedValueSize());
+                    //这里的onCompletion就是我们自己设置的回调函数
                     thunk.callback.onCompletion(metadata, null);
                 } else {
                     thunk.callback.onCompletion(null, exception);
