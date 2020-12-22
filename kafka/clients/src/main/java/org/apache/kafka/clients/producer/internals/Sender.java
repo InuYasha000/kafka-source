@@ -192,7 +192,7 @@ public class Sender implements Runnable {
         while (iter.hasNext()) {
             Node node = iter.next();
             //是否准备好向这些leader broker可以发送消息了，也就是是否已经建立了链接
-            if (!this.client.ready(node, now)) {
+            if (!this.client.ready(node, now)) {//返回false表示并没有建立好连接，此时会直接删除这个broker，并不会在下面发送请求
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
             }

@@ -170,7 +170,7 @@ public class NetworkClient implements KafkaClient {
         //不是null，说明之前建立过连接但是断开了，此时判断是否超过超时时间，这样可以重连
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
-            //建立连接
+            //初始化连接，最终在 NetworkClient.poll() 建立连接
             initiateConnect(node, now);
 
         return false;
@@ -256,6 +256,7 @@ public class NetworkClient implements KafkaClient {
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
         this.inFlightRequests.add(request);
+        //OP_WRITE事件
         selector.send(request.request());
     }
 
@@ -273,6 +274,7 @@ public class NetworkClient implements KafkaClient {
         // metadataUpdater 更新元数据
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
+            //在这里会执行跟目标节点broker完成最终的建立
             this.selector.poll(Utils.min(timeout, metadataTimeout, requestTimeoutMs));
         } catch (IOException e) {
             log.error("Unexpected error during I/O", e);
@@ -491,6 +493,7 @@ public class NetworkClient implements KafkaClient {
     private void handleConnections() {
         for (String node : this.selector.connected()) {
             log.debug("Completed connection to node {}", node);
+            //状态机
             this.connectionStates.connected(node);
         }
     }

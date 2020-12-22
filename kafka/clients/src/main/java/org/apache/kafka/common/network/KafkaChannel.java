@@ -66,7 +66,7 @@ public class KafkaChannel {
         if (!transportLayer.ready())
             transportLayer.handshake();
         if (transportLayer.ready() && !authenticator.complete())
-            authenticator.authenticate();
+            authenticator.authenticate();//认证和授权
     }
 
     public void disconnect() {
@@ -161,6 +161,7 @@ public class KafkaChannel {
 
     private boolean send(Send send) throws IOException {
         send.writeTo(transportLayer);
+        //发送完毕，取消WRITE事件
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 

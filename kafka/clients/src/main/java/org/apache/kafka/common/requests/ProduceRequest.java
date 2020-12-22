@@ -49,6 +49,7 @@ public class ProduceRequest extends AbstractRequest {
 
     public ProduceRequest(short acks, int timeout, Map<TopicPartition, ByteBuffer> partitionRecords) {
         super(new Struct(CURRENT_SCHEMA));
+        //topic--partition--ByteBuffer
         Map<String, Map<Integer, ByteBuffer>> recordsByTopic = CollectionUtils.groupDataByTopic(partitionRecords);
         struct.set(ACKS_KEY_NAME, acks);
         struct.set(TIMEOUT_KEY_NAME, timeout);
@@ -64,6 +65,7 @@ public class ProduceRequest extends AbstractRequest {
                                        .set(RECORD_SET_KEY_NAME, buffer);
                 partitionArray.add(part);
             }
+            //注意在这里就是打成二进制字节数组
             topicData.set(PARTITION_DATA_KEY_NAME, partitionArray.toArray());
             topicDatas.add(topicData);
         }

@@ -176,11 +176,6 @@ public class Selector implements Selectable {
      */
     /**
      * 这个方法只是对连接做了初始化，在{@link #poll(long)}方法中完成连接，{@link #connected()}方法检查连接是否建立
-     * @param id The id for this connection
-     * @param address The address to connect to
-     * @param sendBufferSize The send buffer for the socket
-     * @param receiveBufferSize The receive buffer for the socket
-     * @throws IOException
      */
     @Override
     public void connect(String id, InetSocketAddress address, int sendBufferSize, int receiveBufferSize) throws IOException {
@@ -332,25 +327,31 @@ public class Selector implements Selectable {
 
         long endIo = time.nanoseconds();
         this.sensors.ioTime.record(endIo - endSelect, time.milliseconds());
+        //这里就是上面lru的应用，最近最少使用
         maybeCloseOldestConnection();
     }
 
+    /**
+     * 这里就是对selectionKey做一些操作
+     */
     private void pollSelectionKeys(Iterable<SelectionKey> selectionKeys, boolean isImmediatelyConnected) {
         Iterator<SelectionKey> iterator = selectionKeys.iterator();
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
             iterator.remove();
+            //KafkaChannel 之前 attach 到 SelectionKey 上面去了，在这里拿到了
             KafkaChannel channel = channel(key);
 
             // register all per-connection metrics at once
             sensors.maybeRegisterConnectionMetrics(channel.id());
+            //一个客户端不能建立太多连接，因此通过lru方式来淘汰掉最近最少使用的一些连接
             lruConnections.put(channel.id(), currentTimeNanos);
 
             try {
 
                 /* complete any connections that have finished their handshake (either normally or immediately) */
-                if (isImmediatelyConnected || key.isConnectable()) {
-                    if (channel.finishConnect()) {
+                if (isImmediatelyConnected || key.isConnectable()) {//当前SelectionKey是否处于可以连接状态
+                    if (channel.finishConnect()) {//这里就是调用KafkaChannel最底层的SocketChannel的finishConnect方法，这里算是真正建立连接的方法
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
                     } else
@@ -358,6 +359,7 @@ public class Selector implements Selectable {
                 }
 
                 /* if channel is not ready finish prepare */
+                //这里理解成建立连接了，但是没有认证授权
                 if (channel.isConnected() && !channel.ready())
                     channel.prepare();
 
@@ -370,8 +372,10 @@ public class Selector implements Selectable {
 
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
                 if (channel.ready() && key.isWritable()) {
+                    //write,这里是具体的发数据
                     Send send = channel.write();
                     if (send != null) {
+                        //发送完毕，放入 completedSends 中
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }
@@ -492,6 +496,8 @@ public class Selector implements Selectable {
         if (ms < 0L)
             throw new IllegalArgumentException("timeout should be >= 0");
 
+        //注册到Selector上有多个channel，谁有响应过来可以接收，或者谁现在可以执行一个请求的发送，
+        //如果Channel可以准备执行IO读写操作，此时就把那个Channel的SelectionKey返回
         if (ms == 0L)
             return this.nioSelector.selectNow();
         else

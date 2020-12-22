@@ -406,7 +406,9 @@ public final class RecordAccumulator {
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
         for (Node node : nodes) {
             int size = 0;
+            //拿到要发送broker上面所有的partitions
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
+            //这里就是存放要发给broker的batch
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
             int start = drainIndex = drainIndex % parts.size();
@@ -422,13 +424,14 @@ public final class RecordAccumulator {
                             if (first != null) {
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
                                 // Only drain the batch if it is not during backoff period.
-                                if (!backoff) {
+                                if (!backoff) {//不是重试状态
                                     if (size + first.records.sizeInBytes() > maxSize && !ready.isEmpty()) {
                                         // there is a rare case that a single batch size is larger than the request size due
                                         // to compression; in this case we will still eventually send this batch in a single
                                         // request
                                         break;
                                     } else {
+                                        //取出来每个deque的第一个batch
                                         RecordBatch batch = deque.pollFirst();
                                         batch.records.close();
                                         size += batch.records.sizeInBytes();
@@ -440,8 +443,10 @@ public final class RecordAccumulator {
                         }
                     }
                 }
+                //这里就是遍历 parts
                 this.drainIndex = (this.drainIndex + 1) % parts.size();
             } while (start != drainIndex);
+            //发送给每个broker的batch集合
             batches.put(node.id(), ready);
         }
         return batches;
