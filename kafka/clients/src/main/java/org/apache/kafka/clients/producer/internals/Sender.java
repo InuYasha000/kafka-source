@@ -192,7 +192,9 @@ public class Sender implements Runnable {
         while (iter.hasNext()) {
             Node node = iter.next();
             //是否准备好向这些leader broker可以发送消息了，也就是是否已经建立了链接
-            if (!this.client.ready(node, now)) {//返回false表示并没有建立好连接，此时会直接删除这个broker，并不会在下面发送请求
+            if (!this.client.ready(node, now)) {
+                //返回false表示并没有建立好连接，此时会直接删除这个broker，并不会在下面发送请求
+                //确保消息不会发送给还没有准备好的节点
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
             }
@@ -368,6 +370,7 @@ public class Sender implements Runnable {
                                            request.toStruct());
         RequestCompletionHandler callback = new RequestCompletionHandler() {
             public void onComplete(ClientResponse response) {
+                //回调函数作为客户端请求的一个成员变量，客户端请求完成后悔调用回调函数
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }
         };

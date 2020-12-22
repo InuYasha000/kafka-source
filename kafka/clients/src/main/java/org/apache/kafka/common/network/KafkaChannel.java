@@ -39,6 +39,7 @@ public class KafkaChannel {
     //这个Channel读取出来的最近一个响应，也是会被不断被覆盖
     private NetworkReceive receive;
     //交给底层的Channel要发送的最近一个请求，会不断的被覆盖
+    //这个参数表示同一个服务端，上一个请求没有发送成功不会发送下一个请求
     private Send send;
 
     public KafkaChannel(String id, TransportLayer transportLayer, Authenticator authenticator, int maxReceiveSize) throws IOException {

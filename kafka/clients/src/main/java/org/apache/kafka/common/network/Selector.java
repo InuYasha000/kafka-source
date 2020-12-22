@@ -132,6 +132,7 @@ public class Selector implements Selectable {
         this.metricGrpPrefix = metricGrpPrefix;
         this.metricTags = metricTags;
         //保存了 brokerId（key） 到 channel（value） 的关系，每个Broker都有一个网络连接
+        //KafkaChannel封装了SocketChannel
         this.channels = new HashMap<>();
         //已经发送成功的请求
         this.completedSends = new ArrayList<>();
@@ -184,6 +185,7 @@ public class Selector implements Selectable {
 
         SocketChannel socketChannel = SocketChannel.open();
         socketChannel.configureBlocking(false);
+        //客户端的Socket，本质来讲就是端和端的socket通信
         Socket socket = socketChannel.socket();
         //避免双方建立连接了，但是一方断开了但都不知道，因此2小时内没有任何通信的话，就发送一个探测包，根据探测包的结果保持连接、重新连接或者断开连接
         socket.setKeepAlive(true);
@@ -201,6 +203,7 @@ public class Selector implements Selectable {
             //如果这个连接马上就成功了，会马上返回true，否则的话，只要不是这种立马连接成功的话，
             //需要在后面调用 SocketChannel 的 finishConnect 方法，去完成最终的连接
             //阻塞模式的话，会一直阻塞在这里，直到连接成功
+            //这里就理解成发起了连接请求，但是不一定马上就连接成功了
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -213,6 +216,7 @@ public class Selector implements Selectable {
         //就是是否有人同意跟他建立连接，会获取到一个 SelectionKey
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+        //在这里channel就跟SelectionKey关联起来了，在后面会使用到
         key.attach(channel);
         //放入brokerid和KafkaChannel
         this.channels.put(id, channel);

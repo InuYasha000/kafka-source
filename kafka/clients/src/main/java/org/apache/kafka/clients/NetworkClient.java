@@ -48,6 +48,9 @@ import java.util.Random;
 
 /**
  * 发送网络异步io请求响应，非线程安全
+ * {@link #ready(Node, long)} 从RecordAccumulator获取准备完毕的节点，连接所有准备好的节点
+ * {@link #send(ClientRequest, long)}为每个节点创建一个客户端请求，将请求暂存到节点对应的通道中
+ * {@link #poll(long, long)}轮询动作会真正执行网络请求，发送请求和读取响应
  */
 public class NetworkClient implements KafkaClient {
 
@@ -64,6 +67,7 @@ public class NetworkClient implements KafkaClient {
     private final ClusterConnectionStates connectionStates;
 
     /* the set of requests currently being sent or awaiting a response */
+    //这个变量跟ack参数相关，ack为0表示请求不需要响应，因此发送完毕就会从队列中删除，否则的话会在 handleCompletedReceives 中删除
     private final InFlightRequests inFlightRequests;
 
     /* the socket send buffer size in bytes */
@@ -283,11 +287,16 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
+        //完成发送
         handleCompletedSends(responses, updatedNow);
         //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
+        //完成接受
         handleCompletedReceives(responses, updatedNow);
+        //断开连接
         handleDisconnections(responses, updatedNow);
+        //处理连接
         handleConnections();
+        //超时请求
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
@@ -458,6 +467,8 @@ public class NetworkClient implements KafkaClient {
                 //这里的expectResponse就是通过ack计算出来
                 //比如ack=0就代表不关心这个请求的响应，只要发送出去就行了，此时就直接从 inFlightRequest 中移除出去
                 this.inFlightRequests.completeLastSent(send.destination());
+                //ClientResponse包含ClientRequest的意义在于根据响应获取请求中回调对象，这样收到响应后能够回调
+                //回调函数 Sender.produceRequest（）在构造ClientRequest时加入
                 responses.add(new ClientResponse(request, now, false, null));
             }
         }
