@@ -424,6 +424,9 @@ public class NetworkClient implements KafkaClient {
      * @param responses The list of responses to update
      * @param now The current time
      */
+    /**
+     * 超时处理
+     */
     private void handleTimedOutRequests(List<ClientResponse> responses, long now) {
         List<String> nodeIds = this.inFlightRequests.getNodesWithTimedOutRequests(now, this.requestTimeoutMs);
         for (String nodeId : nodeIds) {
@@ -446,9 +449,14 @@ public class NetworkClient implements KafkaClient {
      */
     private void handleCompletedSends(List<ClientResponse> responses, long now) {
         // if no response is expected then when the send is completed, return it
+        //遍历刚刚发送出去的请求
         for (Send send : this.selector.completedSends()) {
+            // destination 就是 brokerId
+            //最近发送给一个Broker的一个请求
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
             if (!request.expectResponse()) {
+                //这里的expectResponse就是通过ack计算出来
+                //比如ack=0就代表不关心这个请求的响应，只要发送出去就行了，此时就直接从 inFlightRequest 中移除出去
                 this.inFlightRequests.completeLastSent(send.destination());
                 responses.add(new ClientResponse(request, now, false, null));
             }

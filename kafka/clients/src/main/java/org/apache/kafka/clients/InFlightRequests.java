@@ -65,6 +65,9 @@ final class InFlightRequests {
      * Get the last request we sent to the given node (but don't remove it from the queue)
      * @param node The node id
      */
+    /**
+     * 最近发送的一个请求
+     */
     public ClientRequest lastSent(String node) {
         return requestQueue(node).peekFirst();
     }

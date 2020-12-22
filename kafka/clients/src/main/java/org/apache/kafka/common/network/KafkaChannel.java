@@ -124,9 +124,11 @@ public class KafkaChannel {
     }
 
     public void setSend(Send send) {
+        //这个send只会有一个，这里 send!=null 表示前面一个请求没有发送出去
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress.");
         this.send = send;
+        //增加对 OP_WRITE 事件，保留 OP_READ 事件
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
@@ -150,7 +152,7 @@ public class KafkaChannel {
         Send result = null;
         if (send != null && send(send)) {
             result = send;
-            send = null;
+            send = null;//在这里设置为了null，在前面是有判断send是否为null来判断当前是否有请求没有发送出去
         }
         return result;
     }
@@ -161,7 +163,8 @@ public class KafkaChannel {
 
     private boolean send(Send send) throws IOException {
         send.writeTo(transportLayer);
-        //发送完毕，取消WRITE事件
+        //发送完毕，取消 OP_WRITE 事件
+        //位运算符 & ~ 就是取消关注
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 
