@@ -285,7 +285,7 @@ public class Sender implements Runnable {
                     ProduceResponse.PartitionResponse partResp = entry.getValue();
                     Errors error = Errors.forCode(partResp.errorCode);
                     RecordBatch batch = batches.get(tp);
-                    //这里会去执行我们自定义的逻辑，同时还会释放内存空间
+                    //这里会去执行我们自定义的逻辑，同时还会释放内存空间，关于异常的处理也是在这一块
                     completeBatch(batch, error, partResp.baseOffset, partResp.timestamp, correlationId, now);
                 }
                 this.sensors.recordLatency(response.request().request().destination(), response.requestLatencyMs());
