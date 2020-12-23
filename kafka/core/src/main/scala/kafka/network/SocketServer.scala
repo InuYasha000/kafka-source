@@ -446,6 +446,7 @@ private[kafka] class Processor(val id: Int,
         //对已经发送完毕的响应做处理
         processCompletedSends()
         //接受和发送响应中发现客户端挂掉了，在这里处理这种情况
+        //将连接断开的客户端的响应删除
         processDisconnected()
       } catch {
         // We catch all the throwables here to prevent the processor thread from exiting. We do this because
@@ -497,6 +498,8 @@ private[kafka] class Processor(val id: Int,
       response.request.updateRequestMetrics()
     }
     else {
+      //暂存到KakfaChannel，监听OP_WRITE事件，在poll（指SocketServer的poll）中一直轮训
+      //后续发送步骤跟kafka生产者客户端类似
       selector.send(response.responseSend)
       inflightResponses += (response.request.connectionId -> response)
     }
@@ -538,6 +541,7 @@ private[kafka] class Processor(val id: Int,
         throw new IllegalStateException(s"Send for ${send.destination} completed, but not in `inflightResponses`")
       }
       resp.request.updateRequestMetrics()
+      //发送完毕后，监听OP_READ事件
       selector.unmute(send.destination)
     }
   }
