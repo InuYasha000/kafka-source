@@ -337,6 +337,7 @@ public final class RecordAccumulator {
             TopicPartition part = entry.getKey();
             Deque<RecordBatch> deque = entry.getValue();
 
+            //某个topic在集群中某个分区partition的leader
             Node leader = cluster.leaderFor(part);
             if (leader == null) {
                 //表示不知道leader是谁，在这里设置一个标志位，在后面会进行一个元数据的拉取
@@ -414,7 +415,7 @@ public final class RecordAccumulator {
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
         for (Node node : nodes) {
             int size = 0;
-            //拿到要发送broker上面所有的partitions
+            //拿到要发送 leader 上面所有的partitions
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             //这里就是存放要发给broker的batch
             List<RecordBatch> ready = new ArrayList<>();

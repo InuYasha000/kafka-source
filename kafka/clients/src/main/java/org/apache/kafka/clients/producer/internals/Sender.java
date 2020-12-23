@@ -177,7 +177,7 @@ public class Sender implements Runnable {
         Cluster cluster = metadata.fetch();
         // get the list of partitions with data ready to send
         //获取可以发送消息的partition（写满batch-16KB，或者创建时间超过linger.ms）
-        //这个result中包含了leader broker
+        //某个topic在集群中某个分区partition的leader，这里指 broker
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
         // if there are any partitions whose leaders are not known yet, force metadata update
@@ -193,7 +193,7 @@ public class Sender implements Runnable {
             Node node = iter.next();
             //是否准备好向这些leader broker可以发送消息了，也就是是否已经建立了链接
             if (!this.client.ready(node, now)) {
-                //返回false表示并没有建立好连接，此时会直接删除这个broker，并不会在下面发送请求
+                //返回false表示并没有建立好连接，此时会直接删除这个 leader partition，并不会在下面发送请求
                 //确保消息不会发送给还没有准备好的节点
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
@@ -201,7 +201,8 @@ public class Sender implements Runnable {
         }
 
         // create produce requests
-        //有很多partition可以发送信息，在这里就是根据broker对partition进行分组，分成一个broker对应多个partition
+        //有很多partition可以发送信息，在这里就是根据 broker 对 partition 进行分组，分成一个broker对应多个partition
+        //拿到broker上面所有partition，对每个partition拿到对应deque里面的第一个batch，放到对应broker列表中
         Map<Integer, List<RecordBatch>> batches = this.accumulator.drain(cluster,
                                                                          result.readyNodes,
                                                                          this.maxRequestSize,

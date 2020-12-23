@@ -37,6 +37,7 @@ public class KafkaChannel {
     private final Authenticator authenticator;
     private final int maxReceiveSize;
     //这个Channel读取出来的最近一个响应，也是会被不断被覆盖
+    //这个参数和下面参数一样都是用于拆包和沾包的解决方案
     private NetworkReceive receive;
     //交给底层的Channel要发送的最近一个请求，会不断的被覆盖
     //这个参数表示同一个服务端，上一个请求没有发送成功不会发送下一个请求

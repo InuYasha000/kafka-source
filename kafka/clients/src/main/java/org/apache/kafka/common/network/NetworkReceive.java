@@ -86,9 +86,9 @@ public class NetworkReceive implements Receive {
                 throw new EOFException();
             read += bytesRead;
             if (!size.hasRemaining()) {
-                //rewind将position重置为0，此时就可以从ByteBuffer里读取数据了
+                // rewind 将 position 重置为0，此时就可以从 ByteBuffer 里读取数据了
                 size.rewind();
-                //size.getInt() 默认从ByteBuffer当前position的位置获取4个字节，转换为一个int类型的数字返回给你
+                // size.getInt() 默认从 ByteBuffer 当前 position 的位置获取4个字节，转换为一个int类型的数字返回给你
                 // receiveSize 就代表响应消息大小
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
