@@ -178,8 +178,8 @@ object RequestChannel extends Logging {
 
 class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMetricsGroup {
   private var responseListeners: List[(Int) => Unit] = Nil
-  private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
-  private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
+  private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)//默认500，最小1，queued.max.requests 参数
+  private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)//BlockingQueue的list，大小跟processor相同，每个processor都对应一个 responseQueue 中的 blockingQueue
   for(i <- 0 until numProcessors)
     responseQueues(i) = new LinkedBlockingQueue[RequestChannel.Response]()
 
@@ -210,6 +210,7 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
 
   /** Send a response back to the socket server to be sent over the network */
   def sendResponse(response: RequestChannel.Response) {
+    //根据processor序号找到并放入对应的queue，processor的数量跟responseQueue相同
     responseQueues(response.processor).put(response)
     for(onResponse <- responseListeners)
       onResponse(response.processor)

@@ -50,6 +50,7 @@ import org.apache.kafka.common.requests.SaslHandshakeResponse
 /**
  * Logic to handle the various Kafka requests
  */
+//封装了处理请求的逻辑
 class KafkaApis(val requestChannel: RequestChannel,
                 val replicaManager: ReplicaManager,
                 val coordinator: GroupCoordinator,
@@ -73,19 +74,19 @@ class KafkaApis(val requestChannel: RequestChannel,
       trace("Handling request:%s from connection %s;securityProtocol:%s,principal:%s".
         format(request.requestDesc(true), request.connectionId, request.securityProtocol, request.session.principal))
       ApiKeys.forId(request.requestId) match {
-        case ApiKeys.PRODUCE => handleProducerRequest(request)
-        case ApiKeys.FETCH => handleFetchRequest(request)
-        case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
-        case ApiKeys.METADATA => handleTopicMetadataRequest(request)
-        case ApiKeys.LEADER_AND_ISR => handleLeaderAndIsrRequest(request)
-        case ApiKeys.STOP_REPLICA => handleStopReplicaRequest(request)
+        case ApiKeys.PRODUCE => handleProducerRequest(request)//生产者发送消息
+        case ApiKeys.FETCH => handleFetchRequest(request)//副本来拉消息
+        case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)//查看offset相关
+        case ApiKeys.METADATA => handleTopicMetadataRequest(request)//查看元数据
+        case ApiKeys.LEADER_AND_ISR => handleLeaderAndIsrRequest(request)//查看leader和ISR
+        case ApiKeys.STOP_REPLICA => handleStopReplicaRequest(request)//停止副本
         case ApiKeys.UPDATE_METADATA_KEY => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN_KEY => handleControlledShutdownRequest(request)
-        case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
-        case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
+        case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)//提交offset
+        case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)//拉取offset
         case ApiKeys.GROUP_COORDINATOR => handleGroupCoordinatorRequest(request)
-        case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
-        case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
+        case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)//消费者相关join group流程
+        case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)//心跳，集群和consumer间心跳
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
         case ApiKeys.DESCRIBE_GROUPS => handleDescribeGroupRequest(request)
@@ -332,8 +333,10 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     // the callback for sending a produce response
+    //作为 replicaManager.appendMessages() 的回调函数
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
 
+      //一个请求是以节点为单位发送过来，对应一个节点上多个分区，所以要写入多个分区，因此每个分区也都有各自的响应
       val mergedResponseStatus = responseStatus ++ unauthorizedRequestInfo.mapValues(_ =>
         new PartitionResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code, -1, Message.NoTimestamp))
 
@@ -350,6 +353,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         }
       }
 
+      //回调函数
       def produceResponseCallback(delayTimeMs: Int) {
         if (produceRequest.acks == 0) {
           // no operation needed if producer request.required.acks = 0; however, if there is any error in handling
@@ -385,6 +389,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       // When this callback is triggered, the remote API call has completed
       request.apiRemoteCompleteTimeMs = SystemTime.milliseconds
 
+      //记录当前已经写了多少数据到本地了
       quotaManagers(ApiKeys.PRODUCE.id).recordAndMaybeThrottle(
         request.header.clientId,
         numBytesAppended,
@@ -402,6 +407,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
 
       // call the replica manager to append messages to the replicas
+      //调用replicaManager将消息写入副本，leader和follower都是副本，只是有的replica是leader，有的replica是follower
       replicaManager.appendMessages(
         produceRequest.timeout.toLong,
         produceRequest.acks,

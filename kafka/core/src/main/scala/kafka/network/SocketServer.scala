@@ -436,12 +436,16 @@ private[kafka] class Processor(val id: Int,
         // setup any new connections that have been queued up
         configureNewConnections()
         // register any new responses for writing
-        //处理响应队列
+        //处理响应队列，请求处理完毕之后其实会把响应放入每个Processor对应的一个响应队列里面去的
+        //接着发送给客户端
         processNewResponses()
-        //一个selector对应多个socketChannel，需要在循环中不停poll
+        //selector监听多个socketChannel是否有请求过来，包括查看各个SocketChannel是否准备好输出响应，需要在循环中不停poll
         poll()
+        //对已经接受完毕的请求作处理
         processCompletedReceives()
+        //对已经发送完毕的响应做处理
         processCompletedSends()
+        //接受和发送响应中发现客户端挂掉了，在这里处理这种情况
         processDisconnected()
       } catch {
         // We catch all the throwables here to prevent the processor thread from exiting. We do this because
@@ -516,6 +520,7 @@ private[kafka] class Processor(val id: Int,
         val session = RequestChannel.Session(new KafkaPrincipal(KafkaPrincipal.USER_TYPE, channel.principal.getName),
           channel.socketAddress)
         val req = RequestChannel.Request(processor = id, connectionId = receive.source, session = session, buffer = receive.payload, startTimeMs = time.milliseconds, securityProtocol = protocol)
+        //放到requestChannel，里面requestQueue默认500大小，一旦阻塞就会夯死
         requestChannel.sendRequest(req)
         selector.mute(receive.source)
       } catch {
