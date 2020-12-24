@@ -344,6 +344,7 @@ class LogManager(val logDirs: Array[File],
   /**
    * Make a checkpoint for all logs in provided directory.
    */
+    //日志管理器刷写恢复点到检查点文件
   private def checkpointLogsInDir(dir: File): Unit = {
     val recoveryPoints = this.logsByDir.get(dir.toString)
     if (recoveryPoints.isDefined) {
