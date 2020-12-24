@@ -78,11 +78,16 @@ class LogSegment(val log: FileMessageSet,
     if (messages.sizeInBytes > 0) {
       trace("Inserting %d bytes at offset %d at position %d".format(messages.sizeInBytes, offset, log.sizeInBytes()))
       // append an entry to the index (if needed)
+      //先是会去写index文件，index就是稀疏索引（不是一条数据一个索引，而是一部分数据一个索引，4096字节默认）
+      // indexIntervalBytes 参数 index.interval.bytes ，默认4096 字节
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
+        //offset用于计算出稀疏索引的offset-->当前 .log日志文件的哪个物理位置
         index.append(offset, log.sizeInBytes())
+        //达到4096后就会清0
         this.bytesSinceLastIndexEntry = 0
       }
       // append the messages
+      //向xxx.log顺序写入一条数据
       log.append(messages)
       this.bytesSinceLastIndexEntry += messages.sizeInBytes
     }

@@ -37,6 +37,17 @@ import java.util.concurrent.{ExecutionException, ExecutorService, Executors, Fut
  * 
  * A background thread handles log retention by periodically truncating excess log segments.
  */
+/**
+ * 管理kafka log，创建磁盘文件，读取，删除，所有的读写操作都交给log实例
+ * 每个partition的leader或者follower，就是一个replica
+ * 每个partition replica对应一个log
+ * 如果要往partition leader写入一批数据，那么就是往log中写入数据
+ * 每个log在底层对应磁盘目录，在目录中拆成多个log segment，日志段
+ * 每个日志段都有一个磁盘文件
+ * 每个磁盘文件对应一个 .log .index文件， .log存放数据 .index存放稀疏索引
+ * 顺序写，os cache，定时os cache flush
+ * logCleaner定时删除磁盘文件
+ */
 @threadsafe
 class LogManager(val logDirs: Array[File],
                  val topicConfigs: Map[String, LogConfig],
@@ -58,9 +69,13 @@ class LogManager(val logDirs: Array[File],
   createAndValidateLogDirs(logDirs)
   private val dirLocks = lockLogDirs(logDirs)
   private val recoveryPointCheckpoints = logDirs.map(dir => (dir, new OffsetCheckpoint(new File(dir, RecoveryPointCheckpointFile)))).toMap
+  //扫描你配置的那个logDir下的目录和文件
+  //根据目录和文件的格式，加载出来，当前自己本地储存了哪些分区的log
+  //把每个log的信息实例化成对象，放在自己的内存里面
   loadLogs()
 
   // public, so we can access this from kafka.admin.DeleteTopicTest
+  //清理磁盘文件
   val cleaner: LogCleaner =
     if(cleanerConfig.enableCleaner)
       new LogCleaner(cleanerConfig, logDirs, logs, time = time)
@@ -112,6 +127,7 @@ class LogManager(val logDirs: Array[File],
     val threadPools = mutable.ArrayBuffer.empty[ExecutorService]
     val jobs = mutable.Map.empty[File, Seq[Future[_]]]
 
+    //遍历
     for (dir <- this.logDirs) {
       val pool = Executors.newFixedThreadPool(ioThreads)
       threadPools.append(pool)
@@ -145,6 +161,8 @@ class LogManager(val logDirs: Array[File],
         CoreUtils.runnable {
           debug("Loading log '" + logDir.getName + "'")
 
+          //扫描子目录，扫出每个分区的名字
+          //logDir = topic名字-partition序号
           val topicPartition = Log.parseTopicPartitionName(logDir)
           val config = topicConfigs.getOrElse(topicPartition.topic, defaultConfig)
           val logRecoveryPoint = recoveryPoints.getOrElse(topicPartition, 0L)

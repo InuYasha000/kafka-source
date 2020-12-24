@@ -58,12 +58,16 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   private val lock = new ReentrantLock
   
   /* initialize the memory mapping for this index */
+  //基于OS cache实现的文件映射到内存的技术
+  //就是可以把底层的 .index文件映射到 os cache内存中
+  //针对这个东西的读和写，都是基于os cache内存来执行的
   @volatile
   private[this] var mmap: MappedByteBuffer = {
     val newlyCreated = _file.createNewFile()
     val raf = new RandomAccessFile(_file, "rw")
     try {
       /* pre-allocate the file if necessary */
+      //新创建设置大小，1GB
       if (newlyCreated) {
         if (maxIndexSize < 8)
           throw new IllegalArgumentException("Invalid max index size: " + maxIndexSize)
@@ -207,7 +211,12 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         debug("Adding index entry %d => %d to %s.".format(offset, position, _file.getName))
+        //MappedByteBuffer
+        //基于MappedByteBuffer写入 .index 磁盘文件
+        //这个写入其实基于 os cache来进行的
+        //也就是写入基于内存，而不是底层物理的磁盘文件
         mmap.putInt((offset - baseOffset).toInt)
+        //int是32位，Long是64位，如果在储存逻辑offset用的是差值，数字会很小，就可以转换为int，节约磁盘空间
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset

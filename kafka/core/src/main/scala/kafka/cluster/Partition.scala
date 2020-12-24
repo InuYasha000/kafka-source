@@ -424,26 +424,33 @@ class Partition(val topic: String,
   }
 
   def appendMessagesToLeader(messages: ByteBufferMessageSet, requiredAcks: Int = 0) = {
+    //获取读写锁
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
       val leaderReplicaOpt = leaderReplicaIfLocal()
+      //这个语法就是判断当前partition在本地是否是leader
       leaderReplicaOpt match {
+          //是leader
         case Some(leaderReplica) =>
           val log = leaderReplica.log.get
+          //这个是我们自己配置的，isr列表中至少有一个replica，比如 minIsr=2，表示isr中必须要有一个leader和一个follower
           val minIsr = log.config.minInSyncReplicas
           val inSyncSize = inSyncReplicas.size
 
           // Avoid writing to leader if there are not enough insync replicas to make it safe
+          //当前isr列表竖向小于minIsr && ？？？？
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException("Number of insync replicas for partition [%s,%d] is [%d], below required minimum [%d]"
               .format(topic, partitionId, inSyncSize, minIsr))
           }
 
+          //获取到这个partition对应的log，基于这个log对象把数据写入进去
           val info = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
 
+          //不是leader
         case None =>
           throw new NotLeaderForPartitionException("Leader not local for partition [%s,%d] on broker %d"
             .format(topic, partitionId, localBrokerId))

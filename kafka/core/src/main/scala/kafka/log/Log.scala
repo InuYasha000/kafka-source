@@ -317,6 +317,7 @@ class Log(val dir: File,
    * @return Information about the appended messages including the first and last offset.
    */
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
+    //分析你要写入的数据
     val appendInfo = analyzeAndValidateMessageSet(messages)
 
     // if we have any valid messages, append them to the log
@@ -328,10 +329,14 @@ class Log(val dir: File,
 
     try {
       // they are valid, insert them in the log
+      //对于一个分区目录而言，写入都是并发控制的
       lock synchronized {
 
         if (assignOffsets) {
           // assign offsets to the message set
+          //对于每个分区目录，其实写入数据的时候
+          //消息的offset都是顺序增长的
+          //这个分区下，第一个offset就是0，后面就是1，依次增长的
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
@@ -380,12 +385,15 @@ class Log(val dir: File,
         }
 
         // maybe roll the log if this segment is full
+        //如果一个segment写满了，有固定大小，1GB，此时就创建新的segment file
+        //基于segment写入对应磁盘文件
         val segment = maybeRoll(validMessages.sizeInBytes)
 
         // now append to the log
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
+        //然后更新leo
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
@@ -616,6 +624,8 @@ class Log(val dir: File,
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
     val segment = activeSegment
+    //config.segmentSize默认1GB
+    //当前segment大小 + 写入消息大小 > 1GB 新建segment
     if (segment.size > config.segmentSize - messagesSize ||
         segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs ||
         segment.index.isFull) {
@@ -641,7 +651,12 @@ class Log(val dir: File,
   def roll(): LogSegment = {
     val start = time.nanoseconds
     lock synchronized {
+      //写入一条数据，leo=1，但是写入的第一条数据的offset = 0
+      //leo永远都是大于最后一条数据的offset
       val newOffset = logEndOffset
+      //分区目录下面构建新的目录文件，leo作为新的文件的名字
+      //0000 0000 0000 0000 0000.log
+      //0000 0000 0000 0001 2358.log
       val logFile = logFilename(dir, newOffset)
       val indexFile = indexFilename(dir, newOffset)
       for(file <- List(logFile, indexFile); if file.exists) {
@@ -665,6 +680,7 @@ class Log(val dir: File,
                                    fileAlreadyExists = false,
                                    initFileSize = initFileSize,
                                    preallocate = config.preallocate)
+      //新的segment放到总的segment中
       val prev = addSegment(segment)
       if(prev != null)
         throw new KafkaException("Trying to roll a new log segment for topic partition %s with start offset %d while it already exists.".format(name, newOffset))
@@ -676,6 +692,7 @@ class Log(val dir: File,
 
       info("Rolled new log segment for '" + name + "' in %.0f ms.".format((System.nanoTime - start) / (1000.0*1000.0)))
 
+      //返回segment
       segment
     }
   }

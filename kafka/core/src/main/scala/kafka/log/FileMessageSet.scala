@@ -294,7 +294,12 @@ class FileMessageSet private[kafka](@volatile var file: File,
    * Append these messages to the message set
    */
   def append(messages: ByteBufferMessageSet) {
+    //channel其实就是 .log日志文件对应的FileChannel
+    //RandomAccessFile获取出来的
     val written = messages.writeFullyTo(channel)
+    //ByteBufferMessageSet 里面封装了分区本次要写入的所有的数据
+    //此时调用这个方法，其实就是把这些数据写入到一个channel去
+    //Channel也就是对接着底层的磁盘文件的
     _size.getAndAdd(written)
   }
 
@@ -390,6 +395,7 @@ object FileMessageSet
       if (fileAlreadyExists)
         new RandomAccessFile(file, "rw").getChannel()
       else {
+        //提前预分配
         if (preallocate) {
           val randomAccessFile = new RandomAccessFile(file, "rw")
           randomAccessFile.setLength(initFileSize)
