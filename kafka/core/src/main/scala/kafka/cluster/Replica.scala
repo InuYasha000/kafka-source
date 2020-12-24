@@ -24,11 +24,11 @@ import kafka.common.KafkaException
 
 import java.util.concurrent.atomic.AtomicLong
 
-class Replica(val brokerId: Int,
-              val partition: Partition,
+class Replica(val brokerId: Int,//副本所在代理节点编号
+              val partition: Partition,//副本所属分区
               time: Time = SystemTime,
-              initialHighWatermarkValue: Long = 0L,
-              val log: Option[Log] = None) extends Logging {
+              initialHighWatermarkValue: Long = 0L,//hw,高水位
+              val log: Option[Log] = None) extends Logging {//跟该副本关联的本地日志文件 还有一个leo--日志文件的结束位置偏移量
   // the high watermark offset value, in non-leader replicas only its message offsets are kept
   @volatile private[this] var highWatermarkMetadata: LogOffsetMetadata = new LogOffsetMetadata(initialHighWatermarkValue)
   // the log end offset value, kept in all replicas;

@@ -75,7 +75,7 @@ case class LogAppendInfo(var firstOffset: Long,
  *
  */
 @threadsafe
-class Log(val dir: File,
+class Log(val dir: File,//日志对应的目录
           @volatile var config: LogConfig,
           @volatile var recoveryPoint: Long = 0L,
           scheduler: Scheduler,
@@ -97,12 +97,16 @@ class Log(val dir: File,
   }
 
   /* the actual segments of the log */
+  //日志包含多个日志分段
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   loadSegments()
 
   /* Calculate the offset of the next message */
   @volatile var nextOffsetMetadata = new LogOffsetMetadata(activeSegment.nextOffset(), activeSegment.baseOffset, activeSegment.size.toInt)
 
+  //一个日志目录对应一个分区
+  //基于日志的dir表示分区目录，可以解析并构造出分区对象TopicAndPartition
+  //baseOffset表示这个分段相对于整个日志的基准偏移量（绝对位置）
   val topicAndPartition: TopicAndPartition = Log.parseTopicPartitionName(dir)
 
   info("Completed load of log %s with log end offset %d".format(name, logEndOffset))
@@ -316,8 +320,9 @@ class Log(val dir: File,
    *
    * @return Information about the appended messages including the first and last offset.
    */
+  // messages 是客户端创建的消息集
   def append(messages: ByteBufferMessageSet, assignOffsets: Boolean = true): LogAppendInfo = {
-    //分析你要写入的数据
+    //分析你要写入的数据，这里的分析主要是分区的消息必须有序
     val appendInfo = analyzeAndValidateMessageSet(messages)
 
     // if we have any valid messages, append them to the log
@@ -325,6 +330,7 @@ class Log(val dir: File,
       return appendInfo
 
     // trim any invalid bytes or partial messages before appending it to the on-disk log
+    //验证消息的偏移量是单调递增的
     var validMessages = trimInvalidBytes(messages, appendInfo)
 
     try {
@@ -332,15 +338,18 @@ class Log(val dir: File,
       //对于一个分区目录而言，写入都是并发控制的
       lock synchronized {
 
-        if (assignOffsets) {
+        if (assignOffsets) {//
           // assign offsets to the message set
           //对于每个分区目录，其实写入数据的时候
           //消息的offset都是顺序增长的
           //这个分区下，第一个offset就是0，后面就是1，依次增长的
+          //起始偏移量来自最新的 “下一个偏移量”， 不是消息自带的相对偏移量
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
+          //获取最新的下一个偏移量作为第一个消息的绝对偏移量
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
           val (validatedMessages, messageSizesMaybeChanged) = try {
+            //基于起始偏移量，为有效的消息集的每条消息重新分配绝对偏移量
             validMessages.validateMessagesAndAssignOffsets(offset,
                                                            now,
                                                            appendInfo.sourceCodec,
@@ -390,15 +399,18 @@ class Log(val dir: File,
         val segment = maybeRoll(validMessages.sizeInBytes)
 
         // now append to the log
+        //appendInfo.firstOffset是基准偏移量，可以计算出来消息在分区的绝对的偏移量没这样就可以写入日志文件了
+        //追加消息到最新分段
         segment.append(appendInfo.firstOffset, validMessages)
 
         // increment the log end offset
-        //然后更新leo
+        //然后更新最新的 “下一个偏移量”，这里是这一批消息中最后一条消息的偏移量+1
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
 
+        //刷写磁盘
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -426,6 +438,7 @@ class Log(val dir: File,
    * <li> Whether any compression codec is used (if many are used, then the last one is given)
    * </ol>
    */
+    //对消息进行验证，消息太大和无效会被丢弃
   private def analyzeAndValidateMessageSet(messages: ByteBufferMessageSet): LogAppendInfo = {
     var shallowMessageCount = 0
     var validBytesCount = 0

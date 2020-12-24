@@ -444,8 +444,10 @@ class Partition(val topic: String,
           }
 
           //获取到这个partition对应的log，基于这个log对象把数据写入进去
+          //追加消息到本地日志
           val info = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
+          // 尝试完成被延迟的拉取请求（这个拉取请求来自备份副本）
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
@@ -458,6 +460,8 @@ class Partition(val topic: String,
     }
 
     // some delayed operations may be unblocked after HW changed
+    //如果分区的最高水位（HW）发生变化，尝试完成被延迟的生产请求和拉取请求
+    //这里被延迟的拉取请求来自于消费者客户端，而不是备份副本
     if (leaderHWIncremented)
       tryCompleteDelayedRequests()
 

@@ -356,9 +356,11 @@ class ReplicaManager(val config: KafkaConfig,
                   new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status
       }
 
+      //是否需要立马返回响应,延迟返回生产响应结果
       if (delayedRequestRequired(requiredAcks, messagesPerPartition, localProduceResults)) {
         // create delayed produce operation
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
+        //延迟的生产响应对象
         val delayedProduce = new DelayedProduce(timeout, produceMetadata, this, responseCallback)
 
         // create a list of (topic, partition) pairs to use as keys for this delayed produce operation
@@ -367,6 +369,10 @@ class ReplicaManager(val config: KafkaConfig,
         // try to complete the request immediately, otherwise put it into the purgatory
         // this is because while the delayed produce operation is being created, new
         // requests may arrive and hence make this operation completable.
+        //这里立即尝试是否能够完成这个延迟操作，如果不能则加入“延迟缓存”
+        //加入“延迟缓存”的延迟操作对象有两种完成方式
+        //1：超时，服务端立马返回响应给客户端
+        //2：外部事件导致限制条件不再满足，也会立马返回响应，这里的事件指ISR列表全都返回响应
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
@@ -389,9 +395,16 @@ class ReplicaManager(val config: KafkaConfig,
 
   // If all the following conditions are true, we need to put a delayed produce request and wait for replication to complete
   //
-  // 1. required acks = -1
-  // 2. there is data to append
-  // 3. at least one partition append was successful (fewer errors than partitions)
+  // 1. required acks = -1  acks=-1
+  // 2. there is data to append  数据不为空
+  // 3. at least one partition append was successful (fewer errors than partitions) 至少一个分区写入成功
+  /**
+   *
+   * @param requiredAcks 生产者客户端是否需要等待应答
+   * @param messagesPerPartition
+   * @param localProduceResults 追加结果集
+   * @return
+   */
   private def delayedRequestRequired(requiredAcks: Short, messagesPerPartition: Map[TopicPartition, MessageSet],
                                        localProduceResults: Map[TopicPartition, LogAppendResult]): Boolean = {
     requiredAcks == -1 &&

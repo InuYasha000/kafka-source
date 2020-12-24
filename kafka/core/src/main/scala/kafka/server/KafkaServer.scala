@@ -180,14 +180,15 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         zkUtils = initZk()
 
         /* start log manager */
+        //创建和启动日志管理器
         logManager = createLogManager(zkUtils.zkClient, brokerState)
-        //磁盘读写管理
         logManager.startup()
 
         /* generate brokerId */
         config.brokerId =  getBrokerId
         this.logIdent = "[Kafka Server " + config.brokerId + "], "
 
+        //创建和启动网络服务端
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
@@ -195,6 +196,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         //顺序写磁盘文件，如何利用os cache，定时刷新os cache，基于NIO/BIO写磁盘的细节
         //logCleaner，定时清理磁盘文件的数据
         /* start replica manager */
+        //创建和启动副本管理器
+        //关于日志的操作都只能通过日志管理器完成，日志管理器会传给副本管理器
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown)
         replicaManager.startup()

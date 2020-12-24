@@ -21,7 +21,7 @@ public class PartitionInfo {
     private final String topic;
     //分区号
     private final int partition;
-    //具体哪个Broker上的leader
+    //当前分区的leader
     private final Node leader;
     //分区副本--followers
     private final Node[] replicas;
