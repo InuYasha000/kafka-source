@@ -117,6 +117,7 @@ class ReplicaManager(val config: KafkaConfig,
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
+  //负责从leader拉取数据
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   //每个leader写入一条消息，leader的LEO会推进，但是必须等到所有follower都同步消息，partition的HW才能整体推进一位
   //消费者只能读到HW高水位以下的消息
@@ -349,9 +350,11 @@ class ReplicaManager(val config: KafkaConfig,
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
+      //不同分区对应的不同响应
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
+                  //leo
                   result.info.lastOffset + 1, // required offset
                   new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status
       }
@@ -687,7 +690,7 @@ class ReplicaManager(val config: KafkaConfig,
         else
           Set.empty[Partition]
         val partitionsBecomeFollower = if (!partitionsToBeFollower.isEmpty)
-          makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap, metadataCache)
+           makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap, metadataCache)
         else
           Set.empty[Partition]
 
@@ -788,6 +791,11 @@ class ReplicaManager(val config: KafkaConfig,
    * If an unexpected error is thrown in this function, it will be propagated to KafkaApis where
    * the error message will be set on each partition since we do not know which partition caused it. Otherwise,
    * return the set of partitions that are made follower due to this method
+   */
+  /**
+   * becomeLeaderOrFollower，成为leader或者follower就会调用这个线程
+   * 分配一些follower的分区
+   *
    */
   private def makeFollowers(controllerId: Int,
                             epoch: Int,

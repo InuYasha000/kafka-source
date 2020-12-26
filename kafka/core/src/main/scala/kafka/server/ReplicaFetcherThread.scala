@@ -91,6 +91,7 @@ class ReplicaFetcherThread(name: String,
       false,
       channelBuilder
     )
+    //和producer复用
     new NetworkClient(
       selector,
       new ManualMetadataUpdater(),
@@ -241,6 +242,7 @@ class ReplicaFetcherThread(name: String,
       else {
         val send = new RequestSend(sourceBroker.id.toString, header, request.toStruct)
         val clientRequest = new ClientRequest(time.milliseconds(), true, send, null)
+        //采用同步阻塞的方式发送请求出去，而且必须等到响应获取才可以
         networkClient.blockingSendAndReceive(clientRequest)(time)
       }
     }
@@ -272,9 +274,13 @@ class ReplicaFetcherThread(name: String,
 
     partitionMap.foreach { case ((TopicAndPartition(topic, partition), partitionFetchState)) =>
       if (partitionFetchState.isActive)
+        //offset和fetchSize
+        //这两个参数表示从哪开始拉，拉多少
         requestMap(new TopicPartition(topic, partition)) = new JFetchRequest.PartitionData(partitionFetchState.offset, fetchSize)
     }
 
+    //一次 fetch 请求过去至少要拉取 minBytes（1） 数据
+    //如果一个字节都没有，此时就最多等待 maxWait（500） 时间，放入时间轮
     new FetchRequest(new JFetchRequest(replicaId, maxWait, minBytes, requestMap.asJava))
   }
 

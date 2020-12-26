@@ -411,6 +411,7 @@ class Log(val dir: File,//日志对应的目录
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
 
         //刷写磁盘
+        //默认10000条，表示没有刷到磁盘的数据超过10000条
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -713,6 +714,11 @@ class Log(val dir: File,//日志对应的目录
   /**
    * The number of messages appended to the log since the last flush
    */
+    //LEO
+    //recoveryPoint:
+    //假设flush到磁盘上的数据，offset=23800，recoveryPoint=23800,代表已经flush到磁盘数据
+    //还存在与os cache中的数据，offset=23900，LEO=239001
+    //此时还没有刷到磁盘的数据就是 leo-recoveryPoint
   def unflushedMessages() = this.logEndOffset - this.recoveryPoint
 
   /**
