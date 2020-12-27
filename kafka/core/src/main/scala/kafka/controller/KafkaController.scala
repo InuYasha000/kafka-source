@@ -465,6 +465,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * the partition state machine will refresh our cache for us when performing leader election for all new/offline
    * partitions coming online.
    */
+  /**
+   * 死掉broker上的leader变为下线
+   */
   def onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
     val deadBrokersThatWereShuttingDown =
