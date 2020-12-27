@@ -69,6 +69,7 @@ class KafkaApis(val requestChannel: RequestChannel,
   /**
    * Top-level method that handles all requests and multiplexes to the right api
    */
+    //leader的逻辑
   def handle(request: RequestChannel.Request) {
     try {
       trace("Handling request:%s from connection %s;securityProtocol:%s,principal:%s".
@@ -438,6 +439,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
 
     // the callback for sending a fetch response
+    //拉到数据后的回调函数
     def sendResponseCallback(responsePartitionData: Map[TopicAndPartition, FetchResponsePartitionData]) {
 
       val convertedPartitionData =
@@ -478,6 +480,7 @@ class KafkaApis(val requestChannel: RequestChannel,
         trace(s"Sending fetch response to client ${fetchRequest.clientId} of " +
           s"${convertedPartitionData.values.map(_.messages.sizeInBytes).sum} bytes")
         val response = FetchResponse(fetchRequest.correlationId, mergedPartitionData, fetchRequest.versionId, delayTimeMs)
+        //在这里就把响应放到requestChannel，也就是responseQueues
         requestChannel.sendResponse(new RequestChannel.Response(request, new FetchResponseSend(request.connectionId, response)))
       }
 
@@ -500,6 +503,11 @@ class KafkaApis(val requestChannel: RequestChannel,
       sendResponseCallback(Map.empty)
     else {
       // call the replica manager to fetch messages from the local replica
+      //（1）先会尝试从本地磁盘文件中读取指定offset之后的数据,ReplicaManager 进行拉取
+      //（2）如果能读取到，那么就直接返回给人家就可以了，回调函数
+      //（3）是不是要考虑更新一下HW，ISR，这些东西是否需要在这里来维护
+      //（4）如果读取不到任何新的数据，此时需要采用时间轮机制，延迟执行fetch
+      //（5）如果这个leader分区有新的数据写入，此时可以唤醒时间轮中等待的FetchRequest来执行数据拉取
       replicaManager.fetchMessages(
         fetchRequest.maxWait.toLong,
         fetchRequest.replicaId,

@@ -553,6 +553,7 @@ class Log(val dir: File,//日志对应的目录
       }
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
       if(fetchInfo == null) {
+        //具体在这里读取
         entry = segments.higherEntry(entry.getKey)
       } else {
         return fetchInfo

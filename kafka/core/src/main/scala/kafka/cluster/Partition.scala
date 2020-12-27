@@ -268,6 +268,7 @@ class Partition(val topic: String,
         case Some(leaderReplica) =>
           val replica = getReplica(replicaId).get
           val leaderHW = leaderReplica.highWatermark
+          //follower不在ISR列表并且LEO大于leader的HW，此时加入ISR列表，这个方法是在follower向leaderfetch数据时的操作
           if(!inSyncReplicas.contains(replica) &&
              assignedReplicas.map(_.brokerId).contains(replicaId) &&
                   replica.logEndOffset.offsetDiff(leaderHW) >= 0) {
@@ -348,10 +349,18 @@ class Partition(val topic: String,
    * Note There is no need to acquire the leaderIsrUpdate lock here
    * since all callers of this private API acquire that lock
    */
+  /**
+   * 两种情况触发
+   * 1：ISR列表变更
+   * 2：任何副本LEO变更
+   */
   private def maybeIncrementLeaderHW(leaderReplica: Replica): Boolean = {
+    //获取ISR中所有LEO
     val allLogEndOffsets = inSyncReplicas.map(_.logEndOffset)
+    //所有副本LEO中最小的值，作为新的HW
     val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
     val oldHighWatermark = leaderReplica.highWatermark
+    //新的比旧的更大
     if (oldHighWatermark.messageOffset < newHighWatermark.messageOffset || oldHighWatermark.onOlderSegment(newHighWatermark)) {
       leaderReplica.highWatermark = newHighWatermark
       debug("High watermark for partition [%s,%d] updated to %s".format(topic, partitionId, newHighWatermark))
@@ -376,6 +385,7 @@ class Partition(val topic: String,
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          //是否同步太慢需要从ISR列表中给挪出去
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
@@ -401,6 +411,10 @@ class Partition(val topic: String,
       tryCompleteDelayedRequests()
   }
 
+  /**
+   * 1：follower根本就没更新，超过10s都没有发起一次请求，broker挂了或者所在broker jvm fullgc
+   * 2：follower更新太慢
+   */
   def getOutOfSyncReplicas(leaderReplica: Replica, maxLagMs: Long): Set[Replica] = {
     /**
      * there are two cases that will be handled here -
@@ -447,7 +461,7 @@ class Partition(val topic: String,
           //追加消息到本地日志
           val info = log.append(messages, assignOffsets = true)
           // probably unblock some follower fetch requests since log end offset has been updated
-          // 尝试完成被延迟的拉取请求（这个拉取请求来自备份副本）
+          // 尝试完成被延迟的拉取请求（这个拉取请求来自备份副本，之前的fetch请求是延迟的）
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
