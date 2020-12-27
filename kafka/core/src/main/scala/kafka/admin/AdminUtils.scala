@@ -149,6 +149,20 @@ object AdminUtils extends Logging {
     ret
   }
 
+  /**
+   * 分区副本分配
+   * 关于 fixedStartIndex ，startPartitionId 默认-1最终的效果就是brokerId分配时是随机分配的，轮训所有的分区永远都是从第一个分区开始
+   * 关于副本是如何均匀分配到各个broker上面去的，在这里可以总结出来2点
+   * 1：startIndex 默认是随机数，这样避免第一个副本分配不会是个定值
+   * 2：nextReplicaShift 副本间隔（brokerId间隔）保证每次分配都不一样
+   * 上面两种措施保证分配尽可能均匀
+   * @param brokerMetadatas 集群中broker列表
+   * @param nPartitions 分区数
+   * @param replicationFactor 副本因子
+   * @param fixedStartIndex 起始索引，第一个副本分配的位置，默认值-1
+   * @param startPartitionId 起始分区编号，默认值-1
+   * @return
+   */
   private def assignReplicasToBrokersRackAware(nPartitions: Int,
                                                replicationFactor: Int,
                                                brokerMetadatas: Seq[BrokerMetadata],
@@ -158,15 +172,24 @@ object AdminUtils extends Logging {
       id -> rack
     }.toMap
     val numRacks = brokerRackMap.values.toSet.size
+    //brokerId的列表，分配的brokerId就是从这个里面拿的
     val arrangedBrokerList = getRackAlternatedBrokerList(brokerRackMap)
     val numBrokers = arrangedBrokerList.size
+    //保存分配结果的集合
     val ret = mutable.Map[Int, Seq[Int]]()
+    //起始索引小于0，则随机生成一个，保证brokerId有效
+    //第一个副本分配的位置，因为 fixedStartIndex 默认-1.因此这里是随机数，用来计算一个起始的brokerId
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)
+    //确保起始分区号大于0，因为 startPartitionId 默认-1，因此 currentPartitionId 为0，在下面可以看出来轮训所有的分区，其实是从第一个（0）开始的
     var currentPartitionId = math.max(0, startPartitionId)
+    //副本间隔，目的在于更好均匀分配副本到不同的broker上
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)
+    //轮训所有分区，将每个分区的副本分配到不同broker
+    //这里两个for循环就可以看出来，其实是遍历每个分区，然后给每个分区分配 replicationFactor 个 brokerId
     for (_ <- 0 until nPartitions) {
       if (currentPartitionId > 0 && (currentPartitionId % arrangedBrokerList.size == 0))
         nextReplicaShift += 1
+      //用来计算起始的brokerId，注意 startIndex 其实是一个随机数
       val firstReplicaIndex = (currentPartitionId + startIndex) % arrangedBrokerList.size
       val leader = arrangedBrokerList(firstReplicaIndex)
       val replicaBuffer = mutable.ArrayBuffer(leader)
@@ -176,6 +199,7 @@ object AdminUtils extends Logging {
       for (_ <- 0 until replicationFactor - 1) {
         var done = false
         while (!done) {
+          //从 arrangedBrokerList 拿到broker
           val broker = arrangedBrokerList(replicaIndex(firstReplicaIndex, nextReplicaShift * numRacks, k, arrangedBrokerList.size))
           val rack = brokerRackMap(broker)
           // Skip this broker if
@@ -184,6 +208,7 @@ object AdminUtils extends Logging {
           // 2. the broker has already assigned a replica AND there is one or more brokers that do not have replica assigned
           if ((!racksWithReplicas.contains(rack) || racksWithReplicas.size == numRacks)
               && (!brokersWithReplicas.contains(broker) || brokersWithReplicas.size == numBrokers)) {
+            //保存该分区所有副本分配的broker集合
             replicaBuffer += broker
             racksWithReplicas += rack
             brokersWithReplicas += broker
@@ -192,7 +217,9 @@ object AdminUtils extends Logging {
           k += 1
         }
       }
+      //保存该分区所有副本的分配信息
       ret.put(currentPartitionId, replicaBuffer)
+      //继续为下一个分区分配副本
       currentPartitionId += 1
     }
     ret

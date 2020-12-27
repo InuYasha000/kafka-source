@@ -14,4 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#重平衡
 exec $(dirname $0)/kafka-run-class.sh kafka.admin.ReassignPartitionsCommand "$@"

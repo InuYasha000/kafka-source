@@ -97,6 +97,7 @@ object ReassignPartitionsCommand extends Logging {
     println("Proposed partition reassignment configuration\n\n%s".format(zkUtils.formatAsReassignmentJson(proposedAssignments)))
   }
 
+  //生成方案
   def generateAssignment(zkUtils: ZkUtils, brokerListToReassign: Seq[Int], topicsToMoveJsonString: String, disableRackAware: Boolean): (Map[TopicAndPartition, Seq[Int]], Map[TopicAndPartition, Seq[Int]]) = {
     val topicsToReassign = zkUtils.parseTopicsData(topicsToMoveJsonString)
     val duplicateTopicsToReassign = CoreUtils.duplicates(topicsToReassign)
@@ -120,6 +121,7 @@ object ReassignPartitionsCommand extends Logging {
     (partitionsToBeReassigned, currentAssignment)
   }
 
+  //执行方案
   def executeAssignment(zkUtils: ZkUtils, opts: ReassignPartitionsCommandOptions) {
     if(!opts.options.has(opts.reassignmentJsonFileOpt))
       CommandLineUtils.printUsageAndDie(opts.parser, "If --execute option is used, command must include --reassignment-json-file that was output " + "during the --generate option")
@@ -147,10 +149,12 @@ object ReassignPartitionsCommand extends Logging {
     }
     val reassignPartitionsCommand = new ReassignPartitionsCommand(zkUtils, partitionsToBeReassigned.toMap)
     // before starting assignment, output the current replica assignment to facilitate rollback
+    //先获取到当前分区的副本方案
     val currentPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(partitionsToBeReassigned.map(_._1.topic))
     println("Current partition replica assignment\n\n%s\n\nSave this to use as the --reassignment-json-file option during rollback"
       .format(zkUtils.formatAsReassignmentJson(currentPartitionReplicaAssignment)))
     // start the reassignment
+    //执行新方案的分配
     if(reassignPartitionsCommand.reassignPartitions())
       println("Successfully started reassignment of partitions %s".format(zkUtils.formatAsReassignmentJson(partitionsToBeReassigned.toMap)))
     else
@@ -234,6 +238,8 @@ class ReassignPartitionsCommand(zkUtils: ZkUtils, partitions: collection.Map[Top
       }
       else {
         val jsonReassignmentData = zkUtils.formatAsReassignmentJson(validPartitions)
+        //想要触发副本重分配的方案，把副本重分配的方案写入zk中，/admin/reassign_partitions
+        //一定是controller会监听副本重分配的znode，立马触发重分配
         zkUtils.createPersistentPath(ZkUtils.ReassignPartitionsPath, jsonReassignmentData)
         true
       }

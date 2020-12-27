@@ -327,6 +327,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       // increment the controller epoch
       incrementControllerEpoch(zkUtils.zkClient)
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
+      //注册一个reassign partition的监听器（重平衡）
       registerReassignedPartitionsListener()
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
@@ -559,14 +560,22 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * may go through the following transition.
    * AR                 leader/isr
    * {1,2,3}            1/{1,2,3}           (initial state)
-   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2)
-   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4)
-   * {1,2,3,4,5,6}      4/{1,2,3,4,5,6}     (step 7)
-   * {1,2,3,4,5,6}      4/{4,5,6}           (step 8)
-   * {4,5,6}            4/{4,5,6}           (step 10)
+   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2) 在zk中加入4,5,6副本，一旦在zk中更新，此时controller就会感知到
+   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4) 在新机器上分配新的副本，可能在某个时间会出现一个分区有6个副本，但这些新分配的副本都是follower，都在跟leader进行同步，新的follower的LEO大于HW，就会加入ISR中
+   * {1,2,3,4,5,6}      4/{1,2,3,4,5,6}     (step 7) 在6个副本中重新选举一个新的leader出来，是从4,5,6来选举的
+   * {1,2,3,4,5,6}      4/{4,5,6}           (step 8) 从isr列表删除1,2,3副本
+   * {4,5,6}            4/{4,5,6}           (step 10) 从zk中删除1,2,3副本
    *
    * Note that we have to update AR in ZK with RAR last since it's the only place where we store OAR persistently.
    * This way, if the controller crashes before that step, we can still recover.
+   */
+  /**
+   * 1：每个topic在创建的时候都有一个副本分配的方案写入zk中，基于重分配的方案，更新zk中分区副本分配方案
+   * 2：对于重新分配的副本，每个副本所在的broker都发送一个请求，LeaderAndIsr的请求
+   * 3：开启新分配副本通过迁移副本来实现
+   * 4：等待所有重分配副本都跟leader同步
+   * 5：把迁移后的新分配的副本全部改为OnLine状态
+   * 6：更新内存中的分区的实际副本状态
    */
   def onPartitionReassignment(topicAndPartition: TopicAndPartition, reassignedPartitionContext: ReassignedPartitionsContext) {
     val reassignedReplicas = reassignedPartitionContext.newReplicas
@@ -645,6 +654,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
               controllerContext.partitionsBeingReassigned.put(topicAndPartition, reassignedPartitionContext)
               // mark topic ineligible for deletion for the partitions being reassigned
               deleteTopicManager.markTopicIneligibleForDeletion(Set(topic))
+              //重分配
               onPartitionReassignment(topicAndPartition, reassignedPartitionContext)
             } else {
               // some replica in RAR is not alive. Fail partition reassignment
@@ -1279,6 +1289,7 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
           controller.removePartitionFromReassignedPartitions(partitionToBeReassigned._1)
         } else {
           val context = new ReassignedPartitionsContext(partitionToBeReassigned._2)
+          //在这里执行重分配
           controller.initiateReassignReplicasForTopicPartition(partitionToBeReassigned._1, context)
         }
       }
