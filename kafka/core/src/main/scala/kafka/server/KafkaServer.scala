@@ -203,10 +203,13 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         replicaManager.startup()
 
         /* start kafka controller */
+        //每个broker都会有一个 controller ，只会有一个broker成为 controller，
+        //一旦 controller 挂了，其它broker都会尝试成为 controller
         kafkaController = new KafkaController(config, zkUtils, brokerState, kafkaMetricsTime, metrics, threadNamePrefix)
         kafkaController.startup()
 
         /* start group coordinator */
+        //coordinator,consumer group相关
         groupCoordinator = GroupCoordinator(config, zkUtils, replicaManager, kafkaMetricsTime)
         groupCoordinator.startup()
 
@@ -248,6 +251,8 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           else
             (protocol, endpoint)
         }
+        //负责监控kafka broker健康组件
+        //每个broker直接把自己注册到zk上面去，controller实际上就可以感知到集群中所有的broker
         kafkaHealthcheck = new KafkaHealthcheck(config.brokerId, listeners, zkUtils, config.rack,
           config.interBrokerProtocolVersion)
         kafkaHealthcheck.startup()

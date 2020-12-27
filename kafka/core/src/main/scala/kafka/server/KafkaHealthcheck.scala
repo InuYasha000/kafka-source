@@ -37,6 +37,9 @@ import org.apache.zookeeper.Watcher.Event.KeeperState
  * Right now our definition of health is fairly naive. If we register in zk we are healthy, otherwise
  * we are dead.
  */
+/**
+ * 这个类用于broker注册到zk，路径类似于 /brokers/ids/[0...N]，临时节点
+ */
 class KafkaHealthcheck(brokerId: Int,
                        advertisedEndpoints: Map[SecurityProtocol, EndPoint],
                        zkUtils: ZkUtils,
@@ -67,6 +70,7 @@ class KafkaHealthcheck(brokerId: Int,
     // only PLAINTEXT is supported as default
     // if the broker doesn't listen on PLAINTEXT protocol, an empty endpoint will be registered and older clients will be unable to connect
     val plaintextEndpoint = updatedEndpoints.getOrElse(SecurityProtocol.PLAINTEXT, new EndPoint(null,-1,null))
+    //这里就是broker注册到zk
     zkUtils.registerBrokerInZk(brokerId, plaintextEndpoint.host, plaintextEndpoint.port, updatedEndpoints, jmxPort, rack,
       interBrokerProtocolVersion)
   }

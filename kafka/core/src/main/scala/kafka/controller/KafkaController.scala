@@ -163,10 +163,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
   val partitionStateMachine = new PartitionStateMachine(this)
   val replicaStateMachine = new ReplicaStateMachine(this)
+  //controller选举组件
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
   // kafka server
+  //自动重平衡
   private val autoRebalanceScheduler = new KafkaScheduler(1)
   var deleteTopicManager: TopicDeletionManager = null
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
@@ -329,6 +331,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
       partitionStateMachine.registerListeners()
+      //在这里注册了broker的监听
       replicaStateMachine.registerListeners()
       initializeControllerContext()
       replicaStateMachine.startup()
@@ -423,6 +426,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     // broker via this update.
     // In cases of controlled shutdown leaders will not be elected when a new broker comes up. So at least in the
     // common controlled shutdown case, the metadata will reach the new brokers faster
+    //推送元数据变更
+    //发送元数据变更请求给所有或者和死掉的broker，老的broker会感知到？？？？
     sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
     // the very first thing to do when a new broker comes up is send it the entire list of partitions that it is
     // supposed to host. Based on that the broker starts the high watermark threads for the input list of partitions
@@ -503,6 +508,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
+    //这个topic下每个分区变动的监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
     onNewPartitionCreation(newPartitions)
   }
@@ -677,10 +683,13 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * elector
    */
   def startup() = {
+    //加锁
     inLock(controllerContext.controllerLock) {
       info("Controller starting up")
+      //注册zk会话断开监听器
       registerSessionExpirationListener()
       isRunning = true
+      //核心组件是启动这个
       controllerElector.startup
       info("Controller startup complete")
     }
