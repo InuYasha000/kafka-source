@@ -207,6 +207,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             return;
         }
 
+        //找到分区分配的组件
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
@@ -363,6 +364,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
             if (subscriptions.hasPatternSubscription())
                 client.ensureFreshMetadata();
 
+            //确保group处于active状态
             ensureActiveGroup();
         }
     }
@@ -410,6 +412,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     private void doCommitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, final OffsetCommitCallback callback) {
         this.subscriptions.needRefreshCommits();
+        //提交给coordinator所在的机器
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
         future.addListener(new RequestFutureListener<Void>() {
