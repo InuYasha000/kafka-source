@@ -177,15 +177,19 @@ public class Fetcher<K, V> {
             if (!subscriptions.isAssigned(tp) || subscriptions.isFetchable(tp))
                 continue;
 
+            //需要重置
             if (subscriptions.isOffsetResetNeeded(tp)) {
+                //重置拉取偏移量到已经提交过的位置
                 resetOffset(tp);
-            } else if (subscriptions.committed(tp) == null) {
+            } else if (subscriptions.committed(tp) == null) {//已提交的偏移量为空
                 // there's no committed position, so we need to reset with the default strategy
+                //需要重置
                 subscriptions.needOffsetReset(tp);
                 resetOffset(tp);
-            } else {
+            } else {//分区状态中已提交的偏移量不为空，直接作为拉取偏移量
                 long committed = subscriptions.committed(tp).offset();
                 log.debug("Resetting offset for partition {} to the committed offset {}", tp, committed);
+                //用已提交偏移量来更新拉取偏移量
                 subscriptions.seek(tp, committed);
             }
         }
@@ -294,6 +298,9 @@ public class Fetcher<K, V> {
      *
      * @param partition The given partition that needs reset offset
      * @throws org.apache.kafka.clients.consumer.NoOffsetForPartitionException If no offset reset strategy is defined
+     */
+    /**
+     * 根据重置策略重置分区的拉取偏移量
      */
     private void resetOffset(TopicPartition partition) {
         OffsetResetStrategy strategy = subscriptions.resetStrategy(partition);
@@ -495,6 +502,7 @@ public class Fetcher<K, V> {
         // create the fetch info
         Cluster cluster = metadata.fetch();
         Map<Node, Map<TopicPartition, FetchRequest.PartitionData>> fetchable = new HashMap<>();
+        //遍历所有存在position的Partition
         for (TopicPartition partition : fetchablePartitions()) {
             Node node = cluster.leaderFor(partition);
             if (node == null) {

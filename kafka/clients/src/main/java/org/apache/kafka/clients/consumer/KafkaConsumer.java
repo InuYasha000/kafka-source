@@ -795,11 +795,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     public void subscribe(Collection<String> topics, ConsumerRebalanceListener listener) {
         acquire();
         try {
+            //主题为空，表示取消订阅
             if (topics.isEmpty()) {
                 // treat subscribing to empty topic list as the same as unsubscribing
                 this.unsubscribe();
             } else {
                 log.debug("Subscribed to topic(s): {}", Utils.join(topics, ", "));
+                //更新订阅对象
                 this.subscriptions.subscribe(topics, listener);
                 metadata.setTopics(subscriptions.groupSubscription());
             }
@@ -969,13 +971,23 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @param timeout The maximum time to block in the underlying poll
      * @return The fetched records (may be empty)
      */
+    /**
+     * 1：客户端订阅主题后通过KafkaConsumer轮询
+     * 2：如果所有分区都有偏移量，进入5
+     * 3：找到没有拉取偏移量的分区
+     * 4：通过 {@link KafkaConsumer#updateFetchPositions(java.util.Set)} 更新3中没有偏移量的分区
+     * 5：拉取消息
+     */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // ensure we have partitions assigned if we expect to
         if (subscriptions.partitionsAutoAssigned())
+            //确保协调者为消费者分配了分区
             coordinator.ensurePartitionAssignment();
 
         // fetch positions if we have partitions we're subscribed to that we
         // don't know the offset for
+        //初始化分区状态，比如更新拉取偏移量
+        //这里就是判断是否所有分区都有position，如果不是的话就去更新missing集合中分区的position
         if (!subscriptions.hasAllFetchPositions())
             updateFetchPositions(this.subscriptions.missingFetchPositions());
 
@@ -992,6 +1004,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         if (!records.isEmpty())
             return records;
 
+        //发送拉取请求拉取消息
         fetcher.sendFetches();
         client.poll(timeout, now);
         return fetcher.fetchedRecords();
@@ -1398,6 +1411,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws NoOffsetForPartitionException If no offset is stored for a given partition and no offset reset policy is
      *             defined
      */
+    /**
+     * 更新分区信息，包括刷新已经提交的偏移量，更新拉取偏移量
+     */
     private void updateFetchPositions(Set<TopicPartition> partitions) {
         // lookup any positions for partitions which are awaiting reset (which may be the
         // case if the user called seekToBeginning or seekToEnd. We do this check first to
@@ -1409,10 +1425,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
             // if we still don't have offsets for all partitions, then we should either seek
             // to the last committed position or reset using the auto reset policy
 
+            // refreshCommittedOffsetsIfNeeded 方法是消费者发送OFFSET_FETCH给协调者，消费者接收到“获取偏移量”的请求结果，更新分区状态的“已提交偏移量”
+            // updateFetchPositions 在具体更新的时候，这个更新的值就来源于上面的请求结果，可能请求结果是空，此时说明协调者并没有“已提交偏移量”，此时分区的“已提交偏移量”也应该为空
+            // 此时就需要重置，向分区的祝福本节点发送”列举偏移量“请求（LIST_OFFSETS）获取分区偏移量
+
             // first refresh commits for all assigned partitions
+            //发送OFFSET_FETCH请求给协调者，获取分区已经提交的偏移量
             coordinator.refreshCommittedOffsetsIfNeeded();
 
             // then do any offset lookups in case some positions are not known
+            //更新分区的拉取偏移量
             fetcher.updateFetchPositions(partitions);
         }
     }

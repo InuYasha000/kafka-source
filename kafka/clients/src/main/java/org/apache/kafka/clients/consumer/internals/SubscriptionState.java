@@ -45,6 +45,7 @@ import java.util.regex.Pattern;
  * partitions. This is updated through {@link #committed(TopicPartition, OffsetAndMetadata)} and can be used
  * to set the initial fetch position (e.g. {@link Fetcher#resetOffset(TopicPartition)}.
  */
+//订阅状态
 public class SubscriptionState {
 
     private enum SubscriptionType {
@@ -58,15 +59,19 @@ public class SubscriptionState {
     private Pattern subscribedPattern;
 
     /* the list of topics the user has requested */
+    //用户注册的主题
     private final Set<String> subscription;
 
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
+    //消费者订阅的主题
     private final Set<String> groupSubscription;
 
     /* the list of partitions the user has requested */
+    //用户分配的分区
     private final Set<TopicPartition> userAssignment;
 
     /* the list of partitions currently assigned */
+    //当前分配的分区及其状态
     private final Map<TopicPartition, TopicPartitionState> assignment;
 
     /* do we need to request a partition assignment from the coordinator? */
@@ -120,7 +125,9 @@ public class SubscriptionState {
         changeSubscription(topics);
     }
 
+    //需要重新分配分区
     public void changeSubscription(Collection<String> topicsToSubscribe) {
+        //每一次订阅有没有改变
         if (!this.subscription.equals(new HashSet<>(topicsToSubscribe))) {
             this.subscription.clear();
             this.subscription.addAll(topicsToSubscribe);
@@ -128,6 +135,7 @@ public class SubscriptionState {
             this.needsPartitionAssignment = true;
 
             // Remove any assigned partitions which are no longer subscribed to
+            //这一次主题没有被订阅，那么去除
             for (Iterator<TopicPartition> it = assignment.keySet().iterator(); it.hasNext(); ) {
                 TopicPartition tp = it.next();
                 if (!subscription.contains(tp.topic()))
@@ -379,10 +387,10 @@ public class SubscriptionState {
     }
 
     private static class TopicPartitionState {
-        private Long position; // last consumed position
-        private OffsetAndMetadata committed;  // last committed position
-        private boolean paused;  // whether this partition has been paused by the user
-        private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting
+        private Long position; // last consumed position 拉取偏移量
+        private OffsetAndMetadata committed;  // last committed position 消费偏移量
+        private boolean paused;  // whether this partition has been paused by the user 分区是否被暂停拉取
+        private OffsetResetStrategy resetStrategy;  // the strategy to use if the offset needs resetting 重置策略
 
         public TopicPartitionState() {
             this.paused = false;
@@ -391,6 +399,7 @@ public class SubscriptionState {
             this.resetStrategy = null;
         }
 
+        //重置拉取偏移量（第一次分配给消费者时调用）
         private void awaitReset(OffsetResetStrategy strategy) {
             this.resetStrategy = strategy;
             this.position = null;
@@ -409,12 +418,14 @@ public class SubscriptionState {
             this.resetStrategy = null;
         }
 
+        //更新拉取偏移量，拉取线程拉取消息后调用
         private void position(long offset) {
             if (!hasValidPosition())
                 throw new IllegalStateException("Cannot set a new position without a valid current position");
             this.position = offset;
         }
 
+        //提交偏移量
         private void committed(OffsetAndMetadata offset) {
             this.committed = offset;
         }
