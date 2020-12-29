@@ -126,19 +126,25 @@ public class Fetcher<K, V> {
      */
     public void sendFetches() {
         for (Map.Entry<Node, FetchRequest> fetchEntry: createFetchRequests().entrySet()) {
+            //为每个节点创建一个请求
             final FetchRequest request = fetchEntry.getValue();
+            // fetchEntry.getKey() 表示发送节点
+            // 异步+轮询，这里就是异步放入 completedFetches 中，然后需要消费者自己手动调用代码来循环，
             client.send(fetchEntry.getKey(), ApiKeys.FETCH, request)
-                    .addListener(new RequestFutureListener<ClientResponse>() {
+                    .addListener(new RequestFutureListener<ClientResponse>() {//添加监听器
                         @Override
                         public void onSuccess(ClientResponse resp) {
                             FetchResponse response = new FetchResponse(resp.responseBody());
                             Set<TopicPartition> partitions = new HashSet<>(response.responseData().keySet());
                             FetchResponseMetricAggregator metricAggregator = new FetchResponseMetricAggregator(sensors, partitions);
 
+                            //请求包含多个分区，响应也包含多个分区
                             for (Map.Entry<TopicPartition, FetchResponse.PartitionData> entry : response.responseData().entrySet()) {
                                 TopicPartition partition = entry.getKey();
+                                //拉取请求时，就是把分区状态的position变量作为拉取偏移量
                                 long fetchOffset = request.fetchData().get(partition).offset;
                                 FetchResponse.PartitionData fetchData = entry.getValue();
+                                //放到 completedFetches 中，从而被 fetchedRecords 方法拿到结果
                                 completedFetches.add(new CompletedFetch(partition, fetchOffset, fetchData, metricAggregator));
                             }
 
