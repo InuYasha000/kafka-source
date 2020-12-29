@@ -46,11 +46,15 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
 
   def startup {
     inLock(controllerContext.controllerLock) {
+      //相当于在 /controller 路径的这个znode上面注册一个监听器，一旦有人竞争成为了controller，就会感知到
+      //有人成为了controller，但是挂掉了，也能感知到
+      //在 leaderChangeListener 中有监听器具体的行为代码，比如controller挂了如何再次选举出一个controller
       controllerContext.zkUtils.zkClient.subscribeDataChanges(electionPath, leaderChangeListener)
       elect
     }
   }
 
+  //尝试去从 /controller 这个znode读取值
   private def getControllerID(): Int = {
     controllerContext.zkUtils.readDataMaybeNull(electionPath)._1 match {
        case Some(controller) => KafkaController.parseControllerId(controller)
@@ -58,6 +62,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     }
   }
 
+  //创建controller
   def elect: Boolean = {
     val timestamp = SystemTime.milliseconds.toString
     val electString = Json.encode(Map("version" -> 1, "brokerid" -> brokerId, "timestamp" -> timestamp))
@@ -68,18 +73,24 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
      * it's possible that the controller has already been elected when we get here. This check will prevent the following 
      * createEphemeralPath method from getting into an infinite loop if this broker is already the controller.
      */
+    //返回-1表示zk没有这个节点，也就是当前没有controller（没有人注册或者注册后一段时间死掉了）
     if(leaderId != -1) {
        debug("Broker %d has been elected as leader, so stopping the election process.".format(leaderId))
        return amILeader
     }
 
     try {
+      //临时节点，创建一个controller的临时节点，一旦宕机直接删了，后续触发监听器
       val zkCheckedEphemeral = new ZKCheckedEphemeral(electionPath,
                                                       electString,
                                                       controllerContext.zkUtils.zkConnection.getZookeeper,
                                                       JaasUtils.isZkSecurityEnabled())
       zkCheckedEphemeral.create()
+
+      //zk会保证同一时间只能有一个人成功创建 /controller 节点
+
       info(brokerId + " successfully elected as leader")
+      //创建成功就会将自己的brokerId赋值leaderId
       leaderId = brokerId
       onBecomingLeader()
     } catch {
@@ -87,6 +98,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
         // If someone else has written the path, then
         leaderId = getControllerID 
 
+        //返回-1表示zk没有这个节点，也就是当前没有controller（没有人注册或者注册后一段时间死掉了）
         if (leaderId != -1)
           debug("Broker %d was elected as leader instead of broker %d".format(leaderId, brokerId))
         else
@@ -143,6 +155,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
           .format(brokerId, dataPath))
         if(amILeader)
           onResigningAsLeader()
+        //关键在这里就是重新选举了
         elect
       }
     }

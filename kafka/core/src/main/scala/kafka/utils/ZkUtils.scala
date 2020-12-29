@@ -43,6 +43,7 @@ object ZkUtils {
   val ConsumersPath = "/consumers"
   val BrokerIdsPath = "/brokers/ids"
   val BrokerTopicsPath = "/brokers/topics"
+  //zk注册controller的路径
   val ControllerPath = "/controller"
   val ControllerEpochPath = "/controller_epoch"
   val ReassignPartitionsPath = "/admin/reassign_partitions"
@@ -274,6 +275,8 @@ class ZkUtils(val zkClient: ZkClient,
                          jmxPort: Int,
                          rack: Option[String],
                          apiVersion: ApiVersion) {
+    //拼接brokerId和id
+    //比如 brokers/ids/0 这个0就是brokerId，是你自己设置的
     val brokerIdPath = BrokerIdsPath + "/" + id
     val timestamp = SystemTime.milliseconds.toString
 

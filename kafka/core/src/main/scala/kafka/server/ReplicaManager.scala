@@ -117,6 +117,7 @@ class ReplicaManager(val config: KafkaConfig,
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
+  //负责从leader拉取数据
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   //每个leader写入一条消息，leader的LEO会推进，但是必须等到所有follower都同步消息，partition的HW才能整体推进一位
   //消费者只能读到HW高水位以下的消息
@@ -225,7 +226,7 @@ class ReplicaManager(val config: KafkaConfig,
   //启动两个线程，维护isr列表
   def startup() {
     // start ISR expiration thread
-    scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
+    scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)//10s
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
 
@@ -349,9 +350,11 @@ class ReplicaManager(val config: KafkaConfig,
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
+      //不同分区对应的不同响应
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
+                  //leo
                   result.info.lastOffset + 1, // required offset
                   new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status
       }
@@ -504,6 +507,8 @@ class ReplicaManager(val config: KafkaConfig,
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
     // read from local logs
+    //从本地磁盘读取数据出来，指定了每个分区从哪个offset开始读取
+    //稀疏索引的使用，那个offset在分区段文件的那个物理位置
     val logReadResults = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
 
     // if the fetch comes from the follower,
@@ -538,6 +543,8 @@ class ReplicaManager(val config: KafkaConfig,
       // try to complete the request immediately, otherwise put it into the purgatory;
       // this is because while the delayed fetch operation is being created, new requests
       // may arrive and hence make this operation completable.
+      //立马完成请求或者放入到时间轮（有可能说此时leader中并没有数据，因此可能需要等待一部分）
+      //因此可能你等待一小会，立马会有请求发送过来
       delayedFetchPurgatory.tryCompleteElseWatch(delayedFetch, delayedFetchKeys)
     }
   }
@@ -559,6 +566,7 @@ class ReplicaManager(val config: KafkaConfig,
 
           // decide whether to only fetch from leader
           val localReplica = if (fetchOnlyFromLeader)
+            //从分区哪个log开始读取
             getLeaderReplicaIfLocal(topic, partition)
           else
             getReplicaOrException(topic, partition)
@@ -576,6 +584,7 @@ class ReplicaManager(val config: KafkaConfig,
            * This can cause a replica to always be out of sync.
            */
           val initialLogEndOffset = localReplica.logEndOffset
+          //具体从哪个segment开始读取
           val logReadInfo = localReplica.log match {
             case Some(log) =>
               log.read(offset, fetchSize, maxOffsetOpt)
@@ -687,7 +696,7 @@ class ReplicaManager(val config: KafkaConfig,
         else
           Set.empty[Partition]
         val partitionsBecomeFollower = if (!partitionsToBeFollower.isEmpty)
-          makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap, metadataCache)
+           makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap, metadataCache)
         else
           Set.empty[Partition]
 
@@ -788,6 +797,11 @@ class ReplicaManager(val config: KafkaConfig,
    * If an unexpected error is thrown in this function, it will be propagated to KafkaApis where
    * the error message will be set on each partition since we do not know which partition caused it. Otherwise,
    * return the set of partitions that are made follower due to this method
+   */
+  /**
+   * becomeLeaderOrFollower，成为leader或者follower就会调用这个线程
+   * 分配一些follower的分区
+   *
    */
   private def makeFollowers(controllerId: Int,
                             epoch: Int,
@@ -907,6 +921,7 @@ class ReplicaManager(val config: KafkaConfig,
 
           // for producer requests with ack > 1, we need to check
           // if they can be unblocked after some follower's log end offsets have moved
+          //尝试唤醒生产者之前延迟生产的任务
           tryCompleteDelayedProduce(new TopicPartitionOperationKey(topicAndPartition))
         case None =>
           warn("While recording the replica LEO, the partition %s hasn't been created.".format(topicAndPartition))

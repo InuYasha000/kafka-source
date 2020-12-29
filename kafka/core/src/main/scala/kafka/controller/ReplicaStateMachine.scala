@@ -351,6 +351,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
    */
   class BrokerChangeListener() extends IZkChildListener with Logging {
     this.logIdent = "[BrokerChangeListener on Controller " + controller.config.brokerId + "]: "
+    //注册broker改变的方法
     def handleChildChange(parentPath : String, currentBrokerList : java.util.List[String]) {
       info("Broker change listener fired for path %s with children %s".format(parentPath, currentBrokerList.sorted.mkString(",")))
       inLock(controllerContext.controllerLock) {
@@ -372,8 +373,10 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               newBrokers.foreach(controllerContext.controllerChannelManager.addBroker)
               deadBrokerIds.foreach(controllerContext.controllerChannelManager.removeBroker)
               if(newBrokerIds.size > 0)
+                //新注册的broker的处理
                 controller.onBrokerStartup(newBrokerIdsSorted)
               if(deadBrokerIds.size > 0)
+                //死掉的broker的处理
                 controller.onBrokerFailure(deadBrokerIdsSorted)
             } catch {
               case e: Throwable => error("Error while handling broker changes", e)

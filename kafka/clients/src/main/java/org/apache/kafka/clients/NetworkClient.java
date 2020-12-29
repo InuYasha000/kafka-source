@@ -293,7 +293,7 @@ public class NetworkClient implements KafkaClient {
         //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
         //完成接收
         handleCompletedReceives(responses, updatedNow);
-        //断开连接
+        //断开连接，比如说broker死掉了，重新选举
         handleDisconnections(responses, updatedNow);
         //处理连接
         handleConnections();
@@ -508,6 +508,7 @@ public class NetworkClient implements KafkaClient {
         }
         // we got a disconnect so we should probably refresh our metadata and see if that broker is dead
         if (this.selector.disconnected().size() > 0)
+            //重新拉取元数据
             metadataUpdater.requestUpdate();
     }
 

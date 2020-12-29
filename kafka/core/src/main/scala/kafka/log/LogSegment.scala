@@ -108,6 +108,11 @@ class LogSegment(val log: FileMessageSet,
    */
   @threadsafe
   private[log] def translateOffset(offset: Long, startingFilePosition: Int = 0): OffsetPosition = {
+    //在index稀疏索引中数据可能是这样的（其实是16进制数，这里是16进制转换过来后）
+    // offset = 23867 position = 11345 (某个segment文件的物理位置)
+    // offset = 24867 position = 12345 (某个segment文件的物理位置)
+    // offset = 25867 position = 13345 (某个segment文件的物理位置)
+    // 二分查找offset
     val mapping = index.lookup(offset)
     log.searchFor(offset, max(mapping.position, startingFilePosition))
   }
@@ -130,6 +135,7 @@ class LogSegment(val log: FileMessageSet,
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
 
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
+    //根据稀疏索引来确定在某个segment的物理位置，position开始读取
     val startPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null

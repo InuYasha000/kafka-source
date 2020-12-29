@@ -86,6 +86,8 @@ abstract class AbstractFetcherThread(name: String,
   override def doWork() {
 
     val fetchRequest = inLock(partitionMapLock) {
+      //对在某个broker上一些leader的一批follower的分区构建一个fetchRequest，发送给一个broker，表示我们现在有一批follower分区需要拉取数据
+      //也就是表示这批follower的leader都是在你这个broker上面
       val fetchRequest = buildFetchRequest(partitionMap)
       if (fetchRequest.isEmpty) {
         trace("There are no active partitions. Back off for %d ms before sending a fetch request".format(fetchBackOffMs))
@@ -95,6 +97,7 @@ abstract class AbstractFetcherThread(name: String,
     }
 
     if (!fetchRequest.isEmpty)
+      //处理fetchRequest
       processFetchRequest(fetchRequest)
   }
 
@@ -104,6 +107,7 @@ abstract class AbstractFetcherThread(name: String,
 
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
+      //发送请求到broker上去，获取结果
       responseData = fetch(fetchRequest)
     } catch {
       case t: Throwable =>
@@ -122,6 +126,7 @@ abstract class AbstractFetcherThread(name: String,
       // process fetched data
       inLock(partitionMapLock) {
 
+        //对结果处理，其实就是写入本地磁盘文件，更新LEO
         responseData.foreach { case (topicAndPartition, partitionData) =>
           val TopicAndPartition(topic, partitionId) = topicAndPartition
           partitionMap.get(topicAndPartition).foreach(currentPartitionFetchState =>

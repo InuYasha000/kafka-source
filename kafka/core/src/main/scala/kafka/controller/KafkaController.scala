@@ -163,10 +163,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
   val partitionStateMachine = new PartitionStateMachine(this)
   val replicaStateMachine = new ReplicaStateMachine(this)
+  //controller选举组件
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
   // kafka server
+  //自动重平衡
   private val autoRebalanceScheduler = new KafkaScheduler(1)
   var deleteTopicManager: TopicDeletionManager = null
   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)
@@ -325,10 +327,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       // increment the controller epoch
       incrementControllerEpoch(zkUtils.zkClient)
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
+      //注册一个reassign partition的监听器（重平衡）
       registerReassignedPartitionsListener()
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
       partitionStateMachine.registerListeners()
+      //在这里注册了broker的监听
       replicaStateMachine.registerListeners()
       initializeControllerContext()
       replicaStateMachine.startup()
@@ -423,6 +427,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     // broker via this update.
     // In cases of controlled shutdown leaders will not be elected when a new broker comes up. So at least in the
     // common controlled shutdown case, the metadata will reach the new brokers faster
+    //推送元数据变更
+    //发送元数据变更请求给所有或者和死掉的broker，老的broker会感知到？？？？
     sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
     // the very first thing to do when a new broker comes up is send it the entire list of partitions that it is
     // supposed to host. Based on that the broker starts the high watermark threads for the input list of partitions
@@ -458,6 +464,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * Note that we don't need to refresh the leader/isr cache for all topic/partitions at this point.  This is because
    * the partition state machine will refresh our cache for us when performing leader election for all new/offline
    * partitions coming online.
+   */
+  /**
+   * 死掉broker上的leader变为下线
    */
   def onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
@@ -503,6 +512,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
+    //这个topic下每个分区变动的监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
     onNewPartitionCreation(newPartitions)
   }
@@ -553,14 +563,22 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * may go through the following transition.
    * AR                 leader/isr
    * {1,2,3}            1/{1,2,3}           (initial state)
-   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2)
-   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4)
-   * {1,2,3,4,5,6}      4/{1,2,3,4,5,6}     (step 7)
-   * {1,2,3,4,5,6}      4/{4,5,6}           (step 8)
-   * {4,5,6}            4/{4,5,6}           (step 10)
+   * {1,2,3,4,5,6}      1/{1,2,3}           (step 2) 在zk中加入4,5,6副本，一旦在zk中更新，此时controller就会感知到
+   * {1,2,3,4,5,6}      1/{1,2,3,4,5,6}     (step 4) 在新机器上分配新的副本，可能在某个时间会出现一个分区有6个副本，但这些新分配的副本都是follower，都在跟leader进行同步，新的follower的LEO大于HW，就会加入ISR中
+   * {1,2,3,4,5,6}      4/{1,2,3,4,5,6}     (step 7) 在6个副本中重新选举一个新的leader出来，是从4,5,6来选举的
+   * {1,2,3,4,5,6}      4/{4,5,6}           (step 8) 从isr列表删除1,2,3副本
+   * {4,5,6}            4/{4,5,6}           (step 10) 从zk中删除1,2,3副本
    *
    * Note that we have to update AR in ZK with RAR last since it's the only place where we store OAR persistently.
    * This way, if the controller crashes before that step, we can still recover.
+   */
+  /**
+   * 1：每个topic在创建的时候都有一个副本分配的方案写入zk中，基于重分配的方案，更新zk中分区副本分配方案
+   * 2：对于重新分配的副本，每个副本所在的broker都发送一个请求，LeaderAndIsr的请求
+   * 3：开启新分配副本通过迁移副本来实现
+   * 4：等待所有重分配副本都跟leader同步
+   * 5：把迁移后的新分配的副本全部改为OnLine状态
+   * 6：更新内存中的分区的实际副本状态
    */
   def onPartitionReassignment(topicAndPartition: TopicAndPartition, reassignedPartitionContext: ReassignedPartitionsContext) {
     val reassignedReplicas = reassignedPartitionContext.newReplicas
@@ -639,6 +657,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
               controllerContext.partitionsBeingReassigned.put(topicAndPartition, reassignedPartitionContext)
               // mark topic ineligible for deletion for the partitions being reassigned
               deleteTopicManager.markTopicIneligibleForDeletion(Set(topic))
+              //重分配
               onPartitionReassignment(topicAndPartition, reassignedPartitionContext)
             } else {
               // some replica in RAR is not alive. Fail partition reassignment
@@ -677,10 +696,13 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * elector
    */
   def startup() = {
+    //加锁
     inLock(controllerContext.controllerLock) {
       info("Controller starting up")
+      //注册zk会话断开监听器
       registerSessionExpirationListener()
       isRunning = true
+      //核心组件是启动这个
       controllerElector.startup
       info("Controller startup complete")
     }
@@ -1270,6 +1292,7 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
           controller.removePartitionFromReassignedPartitions(partitionToBeReassigned._1)
         } else {
           val context = new ReassignedPartitionsContext(partitionToBeReassigned._2)
+          //在这里执行重分配
           controller.initiateReassignReplicasForTopicPartition(partitionToBeReassigned._1, context)
         }
       }
