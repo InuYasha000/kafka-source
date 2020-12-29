@@ -223,15 +223,23 @@ public abstract class AbstractCoordinator implements Closeable {
     /**
      * Ensure that the group is active (i.e. joined and synced)
      */
+    /**
+     * 消费者加入消费组
+     * 1：准备加入
+     * 2：发送“加入消费组”的请求
+     * 3：加入完成执行回调方法
+     */
     public void ensureActiveGroup() {
         // always ensure that the coordinator is ready because we may have been disconnected
         // when sending heartbeats and does not necessarily require us to rejoin the group.
         ensureCoordinatorReady();
 
+        //这个变量 rejoinNeeded 控制是否需要重新加入消费组
         if (!needRejoin())
             return;
 
         if (needsJoinPrepare) {
+            //1：准备加入
             onJoinPrepare(generation, memberId);
             needsJoinPrepare = false;
         }
@@ -247,14 +255,16 @@ public abstract class AbstractCoordinator implements Closeable {
                 continue;
             }
 
-            //发送 joinGroup 请求
+            //2：发送 joinGroup 请求
             RequestFuture<ByteBuffer> future = sendJoinGroupRequest();
             future.addListener(new RequestFutureListener<ByteBuffer>() {
+                //成功加入
                 @Override
                 public void onSuccess(ByteBuffer value) {
                     // handle join completion in the callback so that the callback will be invoked
                     // even if the consumer is woken up before finishing the rebalance
                     onJoinComplete(generation, memberId, protocol, value);
+                    //改变变量，以后就不用重新加入消费组了
                     needsJoinPrepare = true;
                     heartbeatTask.reset();
                 }

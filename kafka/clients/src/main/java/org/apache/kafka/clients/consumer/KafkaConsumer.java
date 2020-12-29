@@ -926,6 +926,10 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @throws org.apache.kafka.common.KafkaException for any other unrecoverable errors (e.g. invalid groupId or
      *             session timeout, errors deserializing key/value pairs, or any new error cases in future versions)
      */
+    /**
+     * 返回一批结果记录，并没有一直轮询返回消息，如果客户端消费者想要一直返回消息，需要自己手动循环调用轮询方法
+     * 这里只是消费者的一次轮询
+     */
     @Override
     public ConsumerRecords<K, V> poll(long timeout) {
         acquire();
@@ -935,8 +939,19 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
             // poll for new data until the timeout expires
             long start = time.milliseconds();
+            //剩余时间
             long remaining = timeout;
             do {
+                //在这里可以看到是循环调用 pollOnce ，并且更新剩余时间
+                //在 pollOnce 方法中拉取器拉倒数据就会立马返回数据，在这里也会立马返回
+
+                //这段解释很重要，关于为什么发送两次请求：
+                //当第一次进来的时候，此时是 pollOnce( 发送第一个请求-->客户端轮询-->获取第一个请求拉取结果 )-->poll( 发送第二个请求-->客户端快速轮询-->返回第一个请求拉取结果 )
+                //第二次进来的时候，因为上一次已经发送了一次请求并且轮询过了，所以在pollOnce中是可以拿到第一次请求返回响应的，简单的说就是
+                //if (!records.isEmpty())
+                //            return records;
+                //这行代码在第二次，第N次都直接返回
+                //为什么要一次发送两个请求了？因为并行发送请求可以提高同一时间内的发送请求量
                 Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollOnce(remaining);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches
@@ -946,6 +961,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     // NOTE: since the consumed position has already been updated, we must not allow
                     // wakeups or any other errors to be triggered prior to returning the fetched records.
                     // Additionally, pollNoWakeup does not allow automatic commits to get triggered.
+                    //在这里其实是可以看到再次发送了请求，也就是说在获取到当前请求的结果后会发送新的请求
                     fetcher.sendFetches();
                     client.pollNoWakeup();
 
@@ -1001,12 +1017,13 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
         // if data is available already, e.g. from a previous network client poll() call to commit,
         // then just return it immediately
-        //如果说，缺失是一下子拉取到了数据，那么直接返回数据即可
+        //如果说，一下子拉取到了数据，那么直接返回数据即可
         if (!records.isEmpty())
             return records;
 
-        //发送拉取请求拉取消息
+        //发送拉取请求拉取消息，这里理解成初始化消息，并没有真正发送，真正发送消息是client.poll
         fetcher.sendFetches();
+        //通过客户端轮询把拉取请求发送出去
         client.poll(timeout, now);
         return fetcher.fetchedRecords();
     }
