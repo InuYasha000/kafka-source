@@ -130,6 +130,7 @@ public class Fetcher<K, V> {
             final FetchRequest request = fetchEntry.getValue();
             // fetchEntry.getKey() 表示发送节点
             // 异步+轮询，这里就是异步放入 completedFetches 中，然后需要消费者自己手动调用代码来循环，
+            //这里的send并没有发送到目标节点，需要调用轮训才会将unsent中的请求发送到目标节点
             client.send(fetchEntry.getKey(), ApiKeys.FETCH, request)
                     .addListener(new RequestFutureListener<ClientResponse>() {//添加监听器
                         @Override
@@ -333,9 +334,11 @@ public class Fetcher<K, V> {
      * @param timestamp The timestamp for fetching offset.
      * @return The offset of the message that is published before the given timestamp
      */
+    //发送请求后不断轮训，直到异步请求完成
     private long listOffset(TopicPartition partition, long timestamp) {
         while (true) {
             RequestFuture<Long> future = sendListOffsetRequest(partition, timestamp);
+            //发送请求后不断轮训，直到异步请求完成
             client.poll(future);
 
             if (future.succeeded())
@@ -361,10 +364,14 @@ public class Fetcher<K, V> {
      *         the defaultResetPolicy is NONE
      */
     public Map<TopicPartition, List<ConsumerRecord<K, V>>> fetchedRecords() {
+        //消费者正在分配分区，不允许发送拉取请求和获取结果，分配完后设置变量为false
         if (this.subscriptions.partitionAssignmentNeeded()) {
             return Collections.emptyMap();
         } else {
             Map<TopicPartition, List<ConsumerRecord<K, V>>> drained = new HashMap<>();
+            // maxPollRecords 这个变量表示消费者来拉取消息时，服务端并不会一次性全部给完消息，
+            //因为需要考虑消费者并不一定能够完全处理完消息，所以存在消息积压可能
+            //这个参数的配置项是 max.poll.records
             int recordsRemaining = maxPollRecords;
             Iterator<CompletedFetch> completedFetchesIterator = completedFetches.iterator();
 
@@ -391,17 +398,20 @@ public class Fetcher<K, V> {
         if (partitionRecords.isEmpty())
             return 0;
 
+        //判断这个分区是不是分配给这个消费者，有可能分配的分区发生了变化
         if (!subscriptions.isAssigned(partitionRecords.partition)) {
             // this can happen when a rebalance happened before fetched records are returned to the consumer's poll call
             log.debug("Not returning fetched records for partition {} since it is no longer assigned", partitionRecords.partition);
         } else {
             // note that the consumed position should always be available as long as the partition is still assigned
+            //订阅状态的分区偏移量
             long position = subscriptions.position(partitionRecords.partition);
             if (!subscriptions.isFetchable(partitionRecords.partition)) {
                 // this can happen when a partition is paused before fetched records are returned to the consumer's poll call
                 log.debug("Not returning fetched records for assigned partition {} since it is no longer fetchable", partitionRecords.partition);
-            } else if (partitionRecords.fetchOffset == position) {
+            } else if (partitionRecords.fetchOffset == position) {//判断分区的拉取偏移量是不是和订阅状态的position变量相同
                 // we are ensured to have at least one record since we already checked for emptiness
+                //这个参数就是之前一次性最大拉取条数参数
                 List<ConsumerRecord<K, V>> partRecords = partitionRecords.take(maxRecords);
                 long nextOffset = partRecords.get(partRecords.size() - 1).offset() + 1;
 
@@ -416,6 +426,8 @@ public class Fetcher<K, V> {
                     records.addAll(partRecords);
                 }
 
+                //更新订阅状态分区状态的拉取偏移量信息
+                //这里是保持订阅状态和分区记录集的拉取偏移量信息都一致
                 subscriptions.position(partitionRecords.partition, nextOffset);
                 return partRecords.size();
             } else {
@@ -438,6 +450,7 @@ public class Fetcher<K, V> {
      * @return A response which can be polled to obtain the corresponding offset.
      */
     private RequestFuture<Long> sendListOffsetRequest(final TopicPartition topicPartition, long timestamp) {
+        //只获取一个分区的偏移量，不像其他消息一样会有多个分区
         Map<TopicPartition, ListOffsetRequest.PartitionData> partitions = new HashMap<>(1);
         partitions.put(topicPartition, new ListOffsetRequest.PartitionData(timestamp, 1));
         PartitionInfo info = metadata.fetch().partition(topicPartition);
@@ -454,7 +467,7 @@ public class Fetcher<K, V> {
             return client.send(node, ApiKeys.LIST_OFFSETS, request)
                     .compose(new RequestFutureAdapter<ClientResponse, Long>() {
                         @Override
-                        public void onSuccess(ClientResponse response, RequestFuture<Long> future) {
+                        public void onSuccess(ClientResponse response, RequestFuture<Long> future) {//这个onSuccess方法是从监听器调用来的
                             handleListOffsetResponse(topicPartition, response, future);
                         }
                     });
@@ -509,6 +522,7 @@ public class Fetcher<K, V> {
         Cluster cluster = metadata.fetch();
         Map<Node, Map<TopicPartition, FetchRequest.PartitionData>> fetchable = new HashMap<>();
         //遍历所有存在position的Partition
+        //fetchablePartitions()方法返回的是已经处理完的分区，因为消息是一批一批拉取的
         for (TopicPartition partition : fetchablePartitions()) {
             Node node = cluster.leaderFor(partition);
             if (node == null) {
@@ -662,9 +676,13 @@ public class Fetcher<K, V> {
         }
     }
 
+    //分区记录集包含了从这个分区拉取到的所有记录，需要多次才能完全消费
     private static class PartitionRecords<K, V> {
+        //拉取偏移量
         private long fetchOffset;
+        //分区信息
         private TopicPartition partition;
+        //记录集
         private List<ConsumerRecord<K, V>> records;
 
         public PartitionRecords(long fetchOffset, TopicPartition partition, List<ConsumerRecord<K, V>> records) {
@@ -673,6 +691,7 @@ public class Fetcher<K, V> {
             this.records = records;
         }
 
+        //记录集为空表示消费完这个分区
         private boolean isEmpty() {
             return records == null || records.isEmpty();
         }
@@ -685,12 +704,14 @@ public class Fetcher<K, V> {
             if (records == null)
                 return new ArrayList<>();
 
+            //记录集比获取的还要少，直接返回所有
             if (n >= records.size()) {
                 List<ConsumerRecord<K, V>> res = this.records;
                 this.records = null;
                 return res;
             }
 
+            //要获取的记录数比分区记录集的记录数少，需要分批获取分区的记录集
             List<ConsumerRecord<K, V>> res = new ArrayList<>(n);
             Iterator<ConsumerRecord<K, V>> iterator = records.iterator();
             for (int i = 0; i < n; i++) {
@@ -698,6 +719,7 @@ public class Fetcher<K, V> {
                 iterator.remove();
             }
 
+            //更新分区记录集的拉取偏移量
             if (iterator.hasNext())
                 this.fetchOffset = iterator.next().offset();
 

@@ -159,6 +159,7 @@ public class RequestFuture<T> {
      * @param <S> The type of the future adapted to
      * @return The new future
      */
+    //监听器的onSuccess会调用适配器的onSuccess
     public <S> RequestFuture<S> compose(final RequestFutureAdapter<T, S> adapter) {
         final RequestFuture<S> adapted = new RequestFuture<S>();
         addListener(new RequestFutureListener<T>() {

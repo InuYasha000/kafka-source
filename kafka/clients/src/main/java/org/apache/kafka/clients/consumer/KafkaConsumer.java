@@ -1024,6 +1024,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         //发送拉取请求拉取消息，这里理解成初始化消息，并没有真正发送，真正发送消息是client.poll
         fetcher.sendFetches();
         //通过客户端轮询把拉取请求发送出去
+        //这里的轮训有很多细节，首先消费者调用 fetcher.sendFetches(); 并没有将消息发送出去，
+        //是client.poll(timeout, now)方法发送出去，这个方法会一直调用到 ConsumerNetworkClient.RequestFutureCompletionHandler.onComplete() 方法
+        //这个方法会fireSuccess() 这个方法就是去调用listener的success方法
         client.poll(timeout, now);
         return fetcher.fetchedRecords();
     }
