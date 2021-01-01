@@ -42,6 +42,7 @@ public class JoinGroupRequest extends AbstractRequest {
     private final String protocolType;
     private final List<ProtocolMetadata> groupProtocols;
 
+    ////ProtocolMetaData 由协议内容和元数据组成
     public static class ProtocolMetadata {
         private final String name;
         private final ByteBuffer metadata;

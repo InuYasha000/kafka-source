@@ -137,6 +137,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         for (PartitionAssignor assignor : assignors) {
             Subscription subscription = assignor.subscription(subscriptions.subscription());
             ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
+            // 每个分区分配器的元数据实际上是一样的
             metadataList.add(new ProtocolMetadata(assignor.name(), metadata));
         }
         return metadataList;
@@ -218,12 +219,14 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         subscriptions.needRefreshCommits();
 
         // update partition assignment
+        //分配的分区设置到消费者订阅状态的分配结果
         subscriptions.assignFromSubscribed(assignment.partitions());
 
         // give the assignor a chance to update internal state based on the received assignment
         assignor.onAssignment(assignment);
 
         // reschedule the auto commit starting from now
+        //重置心跳任务
         if (autoCommitEnabled)
             autoCommitTask.reschedule();
 
@@ -467,6 +470,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    //发送异步提交偏移量给服务端的协调者节点
     private class AutoCommitTask implements DelayedTask {
         private final long interval;
 
@@ -496,6 +500,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 return;
             }
 
+            //从这里看出来所有消费的分区偏移量来自分区状态对象的拉取偏移量，而不是提交偏移量
             commitOffsetsAsync(subscriptions.allConsumed(), new OffsetCommitCallback() {
                 @Override
                 public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {

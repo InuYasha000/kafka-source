@@ -467,7 +467,7 @@ public class Fetcher<K, V> {
             return client.send(node, ApiKeys.LIST_OFFSETS, request)
                     .compose(new RequestFutureAdapter<ClientResponse, Long>() {
                         @Override
-                        public void onSuccess(ClientResponse response, RequestFuture<Long> future) {//这个onSuccess方法是从监听器调用来的
+                        public void onSuccess(ClientResponse response, RequestFuture<Long> future) {
                             handleListOffsetResponse(topicPartition, response, future);
                         }
                     });
