@@ -275,7 +275,7 @@ public abstract class AbstractCoordinator implements Closeable {
                     // after having been woken up, the exception is ignored and we will rejoin
                 }
             });
-            //这里的轮训是阻塞式轮训，确保future有值才会返回
+            //这里的轮训是阻塞式轮训，确保future有值才会返回，也就是这里会阻塞
             client.poll(future);
 
             if (future.failed()) {
