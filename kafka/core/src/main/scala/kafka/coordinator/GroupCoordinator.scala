@@ -241,6 +241,7 @@ class GroupCoordinator(val brokerId: Int,
     }
   }
 
+  //协调者发送“同步组响应”给每个消费者
   private def doSyncGroup(group: GroupMetadata,
                           generationId: Int,
                           memberId: String,
@@ -267,6 +268,7 @@ class GroupCoordinator(val brokerId: Int,
             completeAndScheduleNextHeartbeatExpiration(group, group.get(memberId))
 
             // if this is the leader, then we can attempt to persist state and transition to stable
+            //普通消费者不会执行下面代码，只有主消费者
             if (memberId == group.leaderId) {
               info(s"Assignment received from leader for group ${group.groupId} for generation ${group.generationId}")
 
@@ -284,6 +286,7 @@ class GroupCoordinator(val brokerId: Int,
                       resetAndPropagateAssignmentError(group, errorCode)
                       maybePrepareRebalance(group)
                     } else {
+                      //在这里调用回调函数，发送“同步组响应结果”给每个消费者
                       setAndPropagateAssignment(group, assignment)
                       group.transitionTo(Stable)
                     }
@@ -578,6 +581,7 @@ class GroupCoordinator(val brokerId: Int,
     heartbeatPurgatory.checkAndComplete(memberKey)
   }
 
+  //稳定状态 ==> 准备再平衡
   private def addMemberAndRebalance(sessionTimeoutMs: Int,
                                     clientId: String,
                                     clientHost: String,
@@ -645,6 +649,7 @@ class GroupCoordinator(val brokerId: Int,
     // TODO: add metrics for restabilize timeouts
   }
 
+  //准备再平衡 ==> 稳定
   def onCompleteJoin(group: GroupMetadata) {
     group synchronized {
       val failedMembers = group.notYetRejoinedMembers

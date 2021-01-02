@@ -889,6 +889,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, responseBody)))
   }
 
+  //处理加入组请求
   def handleJoinGroupRequest(request: RequestChannel.Request) {
     import JavaConversions._
 
@@ -896,6 +897,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val responseHeader = new ResponseHeader(request.header.correlationId)
 
     // the callback for sending a join-group response
+    //定义回调方法，原因在于服务端并不会立马返回结果，但是为了保证高性能不阻塞，这里使用回调方法
     def sendResponseCallback(joinResult: JoinGroupResult) {
       val members = joinResult.members map { case (memberId, metadataArray) => (memberId, ByteBuffer.wrap(metadataArray)) }
       val responseBody = new JoinGroupResponse(joinResult.errorCode, joinResult.generationId, joinResult.subProtocol,
@@ -919,6 +921,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       // let the coordinator to handle join-group
       val protocols = joinGroupRequest.groupProtocols().map(protocol =>
         (protocol.name, Utils.toArray(protocol.metadata))).toList
+      // 交给服务端的协调者对象（GroupCoordinator）处理消费者的加入组请求
       coordinator.handleJoinGroup(
         joinGroupRequest.groupId,
         joinGroupRequest.memberId,
@@ -931,6 +934,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     }
   }
 
+  //同步组请求
   def handleSyncGroupRequest(request: RequestChannel.Request) {
     import JavaConversions._
 

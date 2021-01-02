@@ -55,7 +55,11 @@ class ControllerContext(val zkUtils: ZkUtils,
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   var allTopics: Set[String] = Set.empty
+  //分配给分区的所有副本
+  // 0->{0,1,2} , 1->{1,2,3} , 2->{2,3,0}
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
+  //分区的主副本，ISR集合
+  //0->{leader:0,isr=[0,1,2],1->{leader:1,isr=[1,2,3],2->{leader:2,isr=[2,3,0]}}
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
   val partitionsUndergoingPreferredReplicaElection: mutable.Set[TopicAndPartition] = new mutable.HashSet
@@ -160,10 +164,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   this.logIdent = "[Controller " + config.brokerId + "]: "
   private var isRunning = true
   private val stateChangeLogger = KafkaController.stateChangeLogger
+  //conroller上下文
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
   val partitionStateMachine = new PartitionStateMachine(this)
   val replicaStateMachine = new ReplicaStateMachine(this)
   //controller选举组件
+  //去zk注册 /controller ，所有 broker都会去尝试注册，但最终只会有一个broker注册成功
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
@@ -319,6 +325,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * If it encounters any unexpected exception/error while becoming controller, it resigns as the current controller.
    * This ensures another controller election will be triggered and there will always be an actively serving controller
    */
+    //代理节点被选举为 controller 时调用
   def onControllerFailover() {
     if(isRunning) {
       info("Broker %d starting become controller state transition".format(config.brokerId))
@@ -327,30 +334,43 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       // increment the controller epoch
       incrementControllerEpoch(zkUtils.zkClient)
       // before reading source of truth from zookeeper, register the listeners to get broker/topic callbacks
-      //注册一个reassign partition的监听器（重平衡）
+      //注册一个 reassign partition 的监听器（重平衡）
+      //管理性质的监听器
+      //重新分配分区
       registerReassignedPartitionsListener()
+      //ISR改变
       registerIsrChangeNotificationListener()
+      //最优副本的选举
       registerPreferredReplicaElectionListener()
+      //分区状态机注册主题更改监听器
       partitionStateMachine.registerListeners()
       //在这里注册了broker的监听
+      //副本状态机注册代理节点监听器
       replicaStateMachine.registerListeners()
+      //初始化控制器上下文，包括读取监听器相关的zk节点
       initializeControllerContext()
+      //启动副本状态机和分区状态机
       replicaStateMachine.startup()
       partitionStateMachine.startup()
       // register the partition change listeners for all existing topics on failover
+      //为每个分区状态机为每个主题更改分区的监听器
       controllerContext.allTopics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
       info("Broker %d is ready to serve as the new controller with epoch %d".format(config.brokerId, epoch))
       brokerState.newState(RunningAsController)
+      //执行分区重分配和最优副本选举
       maybeTriggerPartitionReassignment()
+      //将分区的主副本和ISR信息发送给所有存活的代理节点
       maybeTriggerPreferredReplicaElection()
       /* send partition leadership info to all live brokers */
       sendUpdateMetadataRequest(controllerContext.liveOrShuttingDownBrokerIds.toSeq)
+      //是否开起来主副本的自动平衡，启动一个定时检查分区平衡的线程，默认300s，延时5s
       if (config.autoLeaderRebalanceEnable) {
         info("starting the partition rebalance scheduler")
         autoRebalanceScheduler.startup()
         autoRebalanceScheduler.schedule("partition-rebalance-thread", checkAndTriggerPartitionRebalance,
           5, config.leaderImbalanceCheckIntervalSeconds.toLong, TimeUnit.SECONDS)
       }
+      //启动删除主题的管理器线程，删除主题不是直接删除，而是异步线程完成
       deleteTopicManager.start()
     }
     else
@@ -361,6 +381,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    * This callback is invoked by the zookeeper leader elector when the current broker resigns as the controller. This is
    * required to clean up internal controller data structures
    */
+    //代理节点被剥夺 controller 调用
   def onControllerResignation() {
     debug("Controller resigning, broker id %d".format(config.brokerId))
     // de-register listeners
@@ -512,7 +533,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   def onNewTopicCreation(topics: Set[String], newPartitions: Set[TopicAndPartition]) {
     info("New topic creation callback for %s".format(newPartitions.mkString(",")))
     // subscribe to partition changes
-    //这个topic下每个分区变动的监听器
+    //为这个新topic下每个分区变动的监听器
     topics.foreach(topic => partitionStateMachine.registerPartitionChangeListener(topic))
     onNewPartitionCreation(newPartitions)
   }
@@ -525,6 +546,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    */
   def onNewPartitionCreation(newPartitions: Set[TopicAndPartition]) {
     info("New partition creation callback for %s".format(newPartitions.mkString(",")))
+    //在这里可以看出来分区状态变更时有顺序的
+    // 不存在 -> 新建 ->上线 -> 下线
+    // 新建 -> 下线
+    //除此之外的顺序都不被允许，这也是这里为什么一次性写两行代码的原因
     partitionStateMachine.handleStateChanges(newPartitions, NewPartition)
     replicaStateMachine.handleStateChanges(controllerContext.replicasForPartition(newPartitions), NewReplica)
     partitionStateMachine.handleStateChanges(newPartitions, OnlinePartition, offlinePartitionSelector)
@@ -702,7 +727,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       //注册zk会话断开监听器
       registerSessionExpirationListener()
       isRunning = true
-      //核心组件是启动这个
+      //启动选举过程
       controllerElector.startup
       info("Controller startup complete")
     }
