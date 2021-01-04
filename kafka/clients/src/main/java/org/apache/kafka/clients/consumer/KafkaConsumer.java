@@ -963,6 +963,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     // Additionally, pollNoWakeup does not allow automatic commits to get triggered.
                     //在这里其实是可以看到再次发送了请求，也就是说在获取到当前请求的结果后会发送新的请求
                     fetcher.sendFetches();
+                    //快速返回不等待
                     client.pollNoWakeup();
 
                     if (this.interceptors == null)

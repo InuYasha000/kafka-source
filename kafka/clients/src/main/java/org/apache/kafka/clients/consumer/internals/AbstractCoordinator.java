@@ -306,6 +306,7 @@ public abstract class AbstractCoordinator implements Closeable {
 
         @Override
         public void run(final long now) {
+            //没有使用自动分配分区（手动分配不会再平衡，也不需要心跳）或正在等待再平衡
             if (generation < 0 || needRejoin() || coordinatorUnknown()) {
                 // no need to send the heartbeat we're not using auto-assignment or if we are
                 // awaiting a rebalance
@@ -319,6 +320,7 @@ public abstract class AbstractCoordinator implements Closeable {
                 return;
             }
 
+            //现在不需要心跳，放到下一次
             if (!heartbeat.shouldHeartbeat(now)) {
                 // we don't need to heartbeat now, so reschedule for when we do
                 client.schedule(this, now + heartbeat.timeToNextHeartbeat(now));
@@ -326,14 +328,19 @@ public abstract class AbstractCoordinator implements Closeable {
                 heartbeat.sentHeartbeat(now);
                 requestInFlight = true;
 
+                //发送心跳请求
                 RequestFuture<Void> future = sendHeartbeatRequest();
+                //添加监听器
                 future.addListener(new RequestFutureListener<Void>() {
                     @Override
-                    public void onSuccess(Void value) {
+                    public void onSuccess(Void value) {//成功收到心跳响应
                         requestInFlight = false;
                         long now = time.milliseconds();
                         heartbeat.receiveHeartbeat(now);
                         long nextHeartbeatTime = now + heartbeat.timeToNextHeartbeat(now);
+                        //再次开启下一个延时心跳
+                        //在这里也可以看出来延时任务和定时任务的区别，这里心跳任务下次执行时间是包含本次心跳执行时间的，并不是按照固定时间间隔来执行
+                        //也就不是定时任务，而是延时任务
                         client.schedule(HeartbeatTask.this, nextHeartbeatTime);
                     }
 
@@ -662,11 +669,12 @@ public abstract class AbstractCoordinator implements Closeable {
         public void handle(HeartbeatResponse heartbeatResponse, RequestFuture<Void> future) {
             sensors.heartbeatLatency.record(response.requestLatencyMs());
             Errors error = Errors.forCode(heartbeatResponse.errorCode());
+            //下面其实是在心跳响应过程中并不执行具体的错误处理操作，只是设置变量
             if (error == Errors.NONE) {
                 log.debug("Received successful heartbeat response for group {}", groupId);
                 future.complete(null);
             } else if (error == Errors.GROUP_COORDINATOR_NOT_AVAILABLE
-                    || error == Errors.NOT_COORDINATOR_FOR_GROUP) {
+                    || error == Errors.NOT_COORDINATOR_FOR_GROUP) {//协调者挂掉了，消费者需要重新连接新的协调者
                 log.debug("Attempt to heart beat failed for group {} since coordinator {} is either not started or not valid.",
                         groupId, coordinator);
                 coordinatorDead();

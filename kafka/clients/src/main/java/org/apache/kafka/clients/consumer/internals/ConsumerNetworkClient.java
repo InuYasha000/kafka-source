@@ -216,6 +216,7 @@ public class ConsumerNetworkClient implements Closeable {
 
     private void poll(long timeout, long now, boolean executeDelayedTasks) {
         // send all the requests we can send now
+        //调用client.send，将请求暂存到网络通道，但是有可能节点没有准备好，仍然不能发送
         trySend(now);
 
         // ensure we don't poll any longer than the deadline for
@@ -227,6 +228,7 @@ public class ConsumerNetworkClient implements Closeable {
         // handle any disconnects by failing the active requests. note that disconnects must
         // be checked immediately following poll since any subsequent call to client.ready()
         // will reset the disconnect status
+        // 使任何不需要连接的失败，在poll（）后
         checkDisconnects(now);
 
         // execute scheduled tasks
@@ -235,6 +237,7 @@ public class ConsumerNetworkClient implements Closeable {
 
         // try again to send requests since buffer space may have been
         // cleared or a connect finished in the poll
+        //再次发送，因为有可能缓存区被清空或者缓存区有链接已经完成
         trySend(now);
 
         // fail requests that couldn't be sent if they have expired
@@ -346,6 +349,7 @@ public class ConsumerNetworkClient implements Closeable {
             Iterator<ClientRequest> iterator = requestEntry.getValue().iterator();
             while (iterator.hasNext()) {
                 ClientRequest request = iterator.next();
+                //已经链接上节点，准备发送
                 if (client.ready(node, now)) {
                     client.send(request, now);
                     iterator.remove();

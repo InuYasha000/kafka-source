@@ -16,11 +16,16 @@ package org.apache.kafka.clients.consumer.internals;
  * A helper class for managing the heartbeat to the coordinator
  */
 public final class Heartbeat {
+    //会话超时时间，超过表示会话失效
     private final long timeout;
+    //心跳间隔，表示多久发送一次心跳
     private final long interval;
 
+    //上一次会话重置时间
     private long lastHeartbeatSend;
+    //发送心跳请求时，记录发送时间
     private long lastHeartbeatReceive;
+    //接收心跳结果后，记录接收时间
     private long lastSessionReset;
 
     public Heartbeat(long timeout,
@@ -50,12 +55,17 @@ public final class Heartbeat {
         return this.lastHeartbeatSend;
     }
 
+    //就是当前时间到下一次调度的时间间隔
+    //返回0表示需要立马发送心跳，大于0表示还需要多少秒才需要发送心跳
     public long timeToNextHeartbeat(long now) {
+        //上次发送心跳后到现在过去了多长时间
         long timeSinceLastHeartbeat = now - Math.max(lastHeartbeatSend, lastSessionReset);
 
+        //超过心跳间隔
         if (timeSinceLastHeartbeat > interval)
             return 0;
         else
+            //多久还要发生一次心跳
             return interval - timeSinceLastHeartbeat;
     }
 

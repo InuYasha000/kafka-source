@@ -75,6 +75,7 @@ public class DelayedTaskQueue {
     public void poll(long now) {
         while (!tasks.isEmpty() && tasks.peek().timeout <= now) {
             Entry entry = tasks.poll();
+            //在这里可以看出来延迟任务到期了再这里直接run了
             entry.task.run(now);
         }
     }
