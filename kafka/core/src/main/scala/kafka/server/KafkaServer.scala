@@ -206,6 +206,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         //每个broker都会有一个 controller ，只会有一个broker成为 controller，
         //一旦 controller 挂了，其它broker都会尝试成为 controller
         kafkaController = new KafkaController(config, zkUtils, brokerState, kafkaMetricsTime, metrics, threadNamePrefix)
+        //在这里会注册一个会话失效的监听器，
         kafkaController.startup()
 
         /* start group coordinator */

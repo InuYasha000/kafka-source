@@ -137,6 +137,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         for (PartitionAssignor assignor : assignors) {
             Subscription subscription = assignor.subscription(subscriptions.subscription());
             ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
+            // 每个分区分配器的元数据实际上是一样的
             metadataList.add(new ProtocolMetadata(assignor.name(), metadata));
         }
         return metadataList;
@@ -218,20 +219,24 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         subscriptions.needRefreshCommits();
 
         // update partition assignment
+        //分配的分区设置到消费者订阅状态的分配结果
         subscriptions.assignFromSubscribed(assignment.partitions());
 
         // give the assignor a chance to update internal state based on the received assignment
         assignor.onAssignment(assignment);
 
         // reschedule the auto commit starting from now
+        //重置心跳任务，加入组完成
         if (autoCommitEnabled)
             autoCommitTask.reschedule();
 
         // execute the user's callback after rebalance
+        //消费者分配到新的分区，这些分区已经添加，触发自定义监听器的回调
         ConsumerRebalanceListener listener = subscriptions.listener();
         log.info("Setting newly assigned partitions {} for group {}", subscriptions.assignedPartitions(), groupId);
         try {
             Set<TopicPartition> assigned = new HashSet<>(subscriptions.assignedPartitions());
+            //消费者平衡监听器
             listener.onPartitionsAssigned(assigned);
         } catch (WakeupException e) {
             throw e;
@@ -241,6 +246,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    //分区分配
     @Override
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
@@ -276,6 +282,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         Map<String, ByteBuffer> groupAssignment = new HashMap<>();
         for (Map.Entry<String, Assignment> assignmentEntry : assignment.entrySet()) {
+            //转换为字节
             ByteBuffer buffer = ConsumerProtocol.serializeAssignment(assignmentEntry.getValue());
             groupAssignment.put(assignmentEntry.getKey(), buffer);
         }
@@ -286,13 +293,17 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     @Override
     protected void onJoinPrepare(int generation, String memberId) {
         // commit offsets prior to rebalance if auto-commit enabled
+        //保存当前分区消费进度，先清除当前分配结果
         maybeAutoCommitOffsetsSync();
 
         // execute the user's callback before rebalance
+        //加入组之前，清除已有分区，触发自定义监听器回调
+        //消费者再平衡监听器，这里表示需要再平衡
         ConsumerRebalanceListener listener = subscriptions.listener();
         log.info("Revoking previously assigned partitions {} for group {}", subscriptions.assignedPartitions(), groupId);
         try {
             Set<TopicPartition> revoked = new HashSet<>(subscriptions.assignedPartitions());
+            //消费者再平衡的监听器
             listener.onPartitionsRevoked(revoked);
         } catch (WakeupException e) {
             throw e;
@@ -302,6 +313,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
 
         assignmentSnapshot = null;
+        //需要重新分配分区，触发自定义监听器回调
         subscriptions.needReassignment();
     }
 
@@ -451,7 +463,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         while (true) {
             ensureCoordinatorReady();
 
+            //执行一次同步提交偏移量，这个是阻塞的
             RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
+            //阻塞来自这段代码，确保偏移量能够提交成功
             client.poll(future);
 
             if (future.succeeded()) {
@@ -467,6 +481,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
     }
 
+    //发送异步提交偏移量给服务端的协调者节点
     private class AutoCommitTask implements DelayedTask {
         private final long interval;
 
@@ -496,6 +511,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
                 return;
             }
 
+            //从这里看出来所有消费的分区偏移量来自分区状态对象的拉取偏移量，而不是提交偏移量
             commitOffsetsAsync(subscriptions.allConsumed(), new OffsetCommitCallback() {
                 @Override
                 public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {

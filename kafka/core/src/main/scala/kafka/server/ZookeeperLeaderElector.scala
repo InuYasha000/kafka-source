@@ -153,7 +153,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
       inLock(controllerContext.controllerLock) {
         debug("%s leader change listener fired for path %s to handle data deleted: trying to elect as a leader"
           .format(brokerId, dataPath))
-        if(amILeader)
+        if(amILeader)//是不是leader
           onResigningAsLeader()
         //关键在这里就是重新选举了
         elect

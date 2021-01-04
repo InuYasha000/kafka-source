@@ -86,6 +86,7 @@ public interface ConsumerRebalanceListener {
      *
      * @param partitions The list of partitions that were assigned to the consumer on the last rebalance
      */
+    //撤销分区
     public void onPartitionsRevoked(Collection<TopicPartition> partitions);
 
     /**
@@ -100,5 +101,6 @@ public interface ConsumerRebalanceListener {
      * @param partitions The list of partitions that are now assigned to the consumer (may include partitions previously
      *            assigned to the consumer)
      */
+    //分配分区
     public void onPartitionsAssigned(Collection<TopicPartition> partitions);
 }

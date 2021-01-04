@@ -349,6 +349,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   /**
    * This is the zookeeper listener that triggers all the state transitions for a replica
    */
+  //更改代理节点监听器
   class BrokerChangeListener() extends IZkChildListener with Logging {
     this.logIdent = "[BrokerChangeListener on Controller " + controller.config.brokerId + "]: "
     //注册broker改变的方法
@@ -361,7 +362,9 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val curBrokers = currentBrokerList.map(_.toInt).toSet.flatMap(zkUtils.getBrokerInfo)
               val curBrokerIds = curBrokers.map(_.id)
               val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
+              //zk中节点列表减去上下文中的表示新增节点列表
               val newBrokerIds = curBrokerIds -- liveOrShuttingDownBrokerIds
+              //同上，删除节点列表
               val deadBrokerIds = liveOrShuttingDownBrokerIds -- curBrokerIds
               val newBrokers = curBrokers.filter(broker => newBrokerIds(broker.id))
               controllerContext.liveBrokers = curBrokers
@@ -372,6 +375,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
                 .format(newBrokerIdsSorted.mkString(","), deadBrokerIdsSorted.mkString(","), liveBrokerIdsSorted.mkString(",")))
               newBrokers.foreach(controllerContext.controllerChannelManager.addBroker)
               deadBrokerIds.foreach(controllerContext.controllerChannelManager.removeBroker)
+              //让控制器处理新增和删除broker事件
               if(newBrokerIds.size > 0)
                 //新注册的broker的处理
                 controller.onBrokerStartup(newBrokerIdsSorted)

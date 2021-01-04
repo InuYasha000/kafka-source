@@ -998,7 +998,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
         // ensure we have partitions assigned if we expect to
         if (subscriptions.partitionsAutoAssigned())
-            //确保协调者为消费者分配了分区
+            //确保协调者为消费者分配了分区，在这里会阻塞住
             coordinator.ensurePartitionAssignment();
 
         // fetch positions if we have partitions we're subscribed to that we
@@ -1453,6 +1453,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
 
             // first refresh commits for all assigned partitions
             //发送OFFSET_FETCH请求给协调者，获取分区已经提交的偏移量
+            //确保在拉取之前，分区有效，存在拉取偏移量
             coordinator.refreshCommittedOffsetsIfNeeded();
 
             // then do any offset lookups in case some positions are not known
