@@ -104,6 +104,15 @@ object AdminUtils extends Logging {
    *                                 assign each replica to a unique rack.
    *
    */
+  /**
+   *
+   * @param brokerMetadatas 集群中broker列表
+   * @param nPartitions 分区数
+   * @param replicationFactor 副本因子
+   * @param fixedStartIndex 起始索引，第一个副本分配位置，默认-1
+   * @param startPartitionId 起始分区编号，默认值-1
+   * @return
+   */
   def assignReplicasToBrokers(brokerMetadatas: Seq[BrokerMetadata],
                               nPartitions: Int,
                               replicationFactor: Int,
@@ -180,7 +189,7 @@ object AdminUtils extends Logging {
     //起始索引小于0，则随机生成一个，保证brokerId有效
     //第一个副本分配的位置，因为 fixedStartIndex 默认-1.因此这里是随机数，用来计算一个起始的brokerId
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)
-    //确保起始分区号大于0，因为 startPartitionId 默认-1，因此 currentPartitionId 为0，在下面可以看出来轮训所有的分区，其实是从第一个（0）开始的
+    //确保起始分区号不小于0，因为 startPartitionId 默认-1，因此 currentPartitionId 为0，在下面可以看出来轮训所有的分区，其实是从第一个（0）开始的
     var currentPartitionId = math.max(0, startPartitionId)
     //副本间隔，目的在于更好均匀分配副本到不同的broker上
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)

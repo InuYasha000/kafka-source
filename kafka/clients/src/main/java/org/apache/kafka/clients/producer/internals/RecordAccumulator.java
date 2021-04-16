@@ -185,6 +185,8 @@ public final class RecordAccumulator {
 
             //下面这些逻辑其实就上面逻辑没走进去，也就是这个分区对应的最新的一个batch写满了，因此新建一个batch
             // we don't have an in-progress record batch try to allocate a new batch
+            //这里的batchSize就是参数 batch.size 控制，默认16KB
+            //你的消息超过16KB了（默认的最大值是1MB），肯定取这两者最大值来赋予内存
             int size = Math.max(this.batchSize, Records.LOG_OVERHEAD + Record.recordSize(key, value));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {}", size, tp.topic(), tp.partition());
             // 基于BufferPool（可以复用）给这个batch分配一块内存
@@ -203,8 +205,12 @@ public final class RecordAccumulator {
                 //也就是复用，那么此时后面线程拿到的ByteBuffer就会释放
                 RecordAppendResult appendResult = tryAppend(timestamp, key, value, callback, dq);
                 if (appendResult != null) {
+                    //在这里为什么要释放空间，这里有两个synchronized代码块，但是中间的free.allocate代码是没有加锁的
+                    //也就是说多线程情况下可能有多个线程都分配到16KB内存了，然后在第二个synchronized卡住了
+                    //拿到synchronized锁的线程在后面DeQue加入了一个batch，也就是RecordBatch，因此别的线程可能就可以直接使用这个batch
+                    //tryAppend方法逻辑就是加入batch，成功了就表示分配的16Kb内存多余，因此调用释放接口
+                    //当然释放接口不是广义上操作系统回收内存，而是扔到队列里面去用来复用，这样没必要下次重新要操作系统分配内存，这属于性能上的一次优化
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
-                    //这里就是上面写的释放内存
                     free.deallocate(buffer);
                     return appendResult;
                 }

@@ -49,6 +49,7 @@ public final class BufferPool {
     private final Deque<ByteBuffer> free;
     //内存耗尽时，当前正在等待分配内存的condition
     private final Deque<Condition> waiters;
+    //初始化为32MB
     private long availableMemory;
     private final Metrics metrics;
     private final Time time;
@@ -110,6 +111,7 @@ public final class BufferPool {
             // 缓存在BufferPool的Deque中的内存空间大小
             int freeListSize = this.free.size() * this.poolableSize;
             //availableMemory 剩余可用空间大小，这里就是当前内存空间（剩余内存空间+缓存起来的内存空间）还可以分配新的ByteBuffer
+            //这里的意思就是当前内存空间（剩余内存空间+缓存起来的内存空间）足够大，可以分配一个size，那么我就分配一个就行了
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
@@ -119,7 +121,7 @@ public final class BufferPool {
                 lock.unlock();
                 //返回需要内存大小的BufferPool
                 return ByteBuffer.allocate(size);
-            } else {
+            } else {//此时就是内存耗尽，内存耗尽的场景下其实就是会去阻塞一段时间，看是否有内存被腾出了可以重复使用了。
                 // we are out of memory and will have to block
                 int accumulated = 0;
                 ByteBuffer buffer = null;

@@ -291,7 +291,7 @@ public class NetworkClient implements KafkaClient {
         //完成发送
         handleCompletedSends(responses, updatedNow);
         //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
-        //完成接收
+        //完成接收，点进去看，里面有处理version（也就是元数据版本号）的代码
         handleCompletedReceives(responses, updatedNow);
         //断开连接，比如说broker死掉了，重新选举
         handleDisconnections(responses, updatedNow);
