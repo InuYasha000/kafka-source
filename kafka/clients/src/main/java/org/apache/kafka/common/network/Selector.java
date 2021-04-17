@@ -323,10 +323,13 @@ public class Selector implements Selectable {
         this.sensors.selectTime.record(endSelect - startSelect, time.milliseconds());
 
         if (readyKeys > 0 || !immediatelyConnectedKeys.isEmpty()) {
+            //这里 immediatelyConnectedKeys 来源自哪里了？其实只有一个来源，之前做nio的connect操作时，有可能有链接立即就连接上了，在这里就是处理了
+            //所以传递的是true，而对于之前不是立马就连接上的，这里就用this,nioSelector.selectedKeys，传递的是false
             pollSelectionKeys(this.nioSelector.selectedKeys(), false);
             pollSelectionKeys(immediatelyConnectedKeys, true);
         }
 
+        //把 Selector.stagedReceives 变量中暂存的响应扔到 Selector.completedReceives 中，然后在外面的 NetworkClient.handleCompletedReceives 方法处理
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
@@ -355,7 +358,7 @@ public class Selector implements Selectable {
 
                 /* complete any connections that have finished their handshake (either normally or immediately) */
                 if (isImmediatelyConnected || key.isConnectable()) {//当前SelectionKey是否处于可以连接状态
-                    if (channel.finishConnect()) {//这里就是调用KafkaChannel最底层的SocketChannel的finishConnect方法，这里算是真正建立连接的方法
+                    if (channel.finishConnect()) {//这里就是调用KafkaChannel最底层的SocketChannel的finishConnect方法，这里算是真正建立连接的方法，然后关注OP_READ事件
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
                     } else
@@ -373,6 +376,7 @@ public class Selector implements Selectable {
                 //最后放到 stagedReceives ，暂存一下，表示接收到但是还没有处理的请求
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+                    //在这里粘包问题出现时，channel.read()方法不会返回null，因此会不停的读
                     while ((networkReceive = channel.read()) != null)
                         addToStagedReceives(channel, networkReceive);
                 }
@@ -391,6 +395,7 @@ public class Selector implements Selectable {
                 /* cancel any defunct sockets */
                 if (!key.isValid()) {
                     close(channel);
+                    //走到这里表示key无效了，也就是连接无效了，因此扔到 Selector.disconnected 中，在外面是处理了的
                     this.disconnected.add(channel.id());
                 }
 
@@ -401,6 +406,7 @@ public class Selector implements Selectable {
                 else
                     log.warn("Unexpected error from {}; closing connection", desc, e);
                 close(channel);
+                //走到这里表示某个channel连接断开了，因此也扔到 Selector.disconnected 中
                 this.disconnected.add(channel.id());
             }
         }

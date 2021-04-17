@@ -288,22 +288,24 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
-        //完成发送
+        //完成发送，把ack=0不需要响应的从 NetworkClient.inFlightRequests 去掉
         handleCompletedSends(responses, updatedNow);
         //这里最终会调用到 this.metadata.update ==>更新元数据，notifyAll 唤醒主线程
         //完成接收，点进去看，里面有处理version（也就是元数据版本号）的代码
+        //这里正式从 NetworkClient.inFlightRequests 去掉
         handleCompletedReceives(responses, updatedNow);
-        //断开连接，比如说broker死掉了，重新选举
+        //断开连接，比如说broker死掉了，重新选举，处理 Selector.disconnected 中的连接
         handleDisconnections(responses, updatedNow);
         //处理连接
         handleConnections();
-        //超时请求
+        //超时请求，这里请求超时没有发出去就代表某个节点可能连接断开了
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
         for (ClientResponse response : responses) {
             if (response.request().hasCallback()) {
                 try {
+                    //这里是去调用request设置的回调函数
                     response.request().callback().onComplete(response);
                 } catch (Exception e) {
                     log.error("Uncaught error in request completion:", e);
@@ -440,6 +442,7 @@ public class NetworkClient implements KafkaClient {
      * 超时处理
      */
     private void handleTimedOutRequests(List<ClientResponse> responses, long now) {
+        //在 inFlightRequests 中超过时间了还没收到响应，就可以认为对应broker连接断开了
         List<String> nodeIds = this.inFlightRequests.getNodesWithTimedOutRequests(now, this.requestTimeoutMs);
         for (String nodeId : nodeIds) {
             // close connection to the node
@@ -466,8 +469,8 @@ public class NetworkClient implements KafkaClient {
             // destination 就是 brokerId
             //最近发送给一个Broker的一个请求
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
-            if (!request.expectResponse()) {
-                //这里的expectResponse就是通过ack计算出来
+            if (!request.expectResponse()) {//这里是ack=0，才会走到if逻辑里面
+                //这里的expectResponse就是通过ack计算出来，也就是 expectResponse 是 ack!=0 如此传值
                 //比如ack=0就代表不关心这个请求的响应，只要发送出去就行了，此时就直接从 inFlightRequest 中移除出去
                 this.inFlightRequests.completeLastSent(send.destination());
                 //ClientResponse包含ClientRequest的意义在于根据响应获取请求中回调对象，这样收到响应后能够回调

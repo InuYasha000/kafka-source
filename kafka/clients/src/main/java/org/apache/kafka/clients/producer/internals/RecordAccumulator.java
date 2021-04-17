@@ -300,6 +300,7 @@ public final class RecordAccumulator {
      * 重新入队
      */
     public void reenqueue(RecordBatch batch, long now) {
+        //已经重试的次数+1
         batch.attempts++;
         batch.lastAttemptMs = now;
         batch.lastAppendTime = now;

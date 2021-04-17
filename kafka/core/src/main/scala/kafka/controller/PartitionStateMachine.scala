@@ -364,6 +364,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
                                 .format(controllerId, controller.epoch, newLeaderAndIsr.leader, topicAndPartition))
       val replicas = controllerContext.partitionReplicaAssignment(TopicAndPartition(topic, partition))
       // store new leader and isr info in cache
+      //发送最新的LeaderAndIsr请求给分区所有副本
       brokerRequestBatch.addLeaderAndIsrRequestForBrokers(replicasForThisPartition, topic, partition,
         newLeaderIsrAndControllerEpoch, replicas)
     } catch {

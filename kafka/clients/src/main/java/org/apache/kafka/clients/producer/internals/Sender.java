@@ -234,7 +234,7 @@ public class Sender implements Runnable {
             log.trace("Created {} produce requests: {}", requests.size(), requests);
             pollTimeout = 0;
         }
-        //NetWorkClient发送请求
+        //NetWorkClient发送请求，这里其实是设置发送的变量 send ，以及设置关注OP_WRITE事件，在下面poll中调用 Selector.pollSelectionKeys 方法去完成发送和接收数据
         for (ClientRequest request : requests)
             client.send(request, now);
 
@@ -310,7 +310,7 @@ public class Sender implements Runnable {
      * @param now The current POSIX time stamp in milliseconds
      */
     private void completeBatch(RecordBatch batch, Errors error, long baseOffset, long timestamp, long correlationId, long now) {
-        //有异常
+        //有异常，重试机制，重试机制也是有重试次数判断的，在下面 canRetry 方法里面
         if (error != Errors.NONE && canRetry(batch, error)) {
             // retry
             log.warn("Got error produce response with correlation id {} on topic-partition {}, retrying ({} attempts left). Error: {}",

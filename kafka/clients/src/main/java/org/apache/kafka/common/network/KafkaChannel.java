@@ -142,6 +142,9 @@ public class KafkaChannel {
         }
 
         receive(receive);
+        //判断读完其实判断size和buffer变量你是否都写完了
+        //首先size变量是固定的4字节，消息长度固定用4字节来表示值，
+        //之后使用size大小为buffer赋值，这样就可以解决粘包问题
         if (receive.complete()) {//是否读完了
             receive.payload().rewind();
             result = receive;
@@ -155,7 +158,7 @@ public class KafkaChannel {
         //倘若在这里send(send) 返回false也就是一次发送没有发送完，那么result=null，此时send并没有设为null，会影响 NetworkClient.ready() 方法判断逻辑
         if (send != null && send(send)) {
             result = send;
-            send = null;//在这里设置为了null，在前面是有判断send是否为null来判断当前是否有请求没有发送出去
+            send = null;//在这里设置为了null，在前面是有判断send是否为null来判断当前是否有请求没有发送出去，也就是拆包粘包解决方案
         }
         return result;
     }

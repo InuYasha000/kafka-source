@@ -105,6 +105,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
    * @param targetState  The state that the replicas should be moved to
    * The controller's allLeaders cache should have been updated before this
    */
+  //对多个副本状态改变，批量请求方式发送多个代理节点
   def handleStateChanges(replicas: Set[PartitionAndReplica], targetState: ReplicaState,
                          callbacks: Callbacks = (new CallbackBuilder).build) {
     if(replicas.size > 0) {
@@ -154,6 +155,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
    * @param partitionAndReplica The replica for which the state transition is invoked
    * @param targetState The end state that the replica should be moved to
    */
+    //单个读本状态改变逻辑
   def handleStateChange(partitionAndReplica: PartitionAndReplica, targetState: ReplicaState,
                         callbacks: Callbacks) {
     val topic = partitionAndReplica.topic
@@ -174,6 +176,9 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
           val leaderIsrAndControllerEpochOpt = ReplicationUtils.getLeaderIsrAndEpochForPartition(zkUtils, topic, partition)
           leaderIsrAndControllerEpochOpt match {
             case Some(leaderIsrAndControllerEpoch) =>
+              //这里的状态变更同之前变更的那样，
+              //如果是主副本的话，不能转换，因为上线状态不能变更为新建
+              //新创建的副本只能是备份副本，所以需要向新副本发送分区等其他信息
               if(leaderIsrAndControllerEpoch.leaderAndIsr.leader == replicaId)
                 throw new StateChangeFailedException("Replica %d for partition %s cannot be moved to NewReplica"
                   .format(replicaId, topicAndPartition) + "state as it is being requested to become leader")
@@ -352,7 +357,6 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
   //更改代理节点监听器
   class BrokerChangeListener() extends IZkChildListener with Logging {
     this.logIdent = "[BrokerChangeListener on Controller " + controller.config.brokerId + "]: "
-    //注册broker改变的方法
     def handleChildChange(parentPath : String, currentBrokerList : java.util.List[String]) {
       info("Broker change listener fired for path %s with children %s".format(parentPath, currentBrokerList.sorted.mkString(",")))
       inLock(controllerContext.controllerLock) {

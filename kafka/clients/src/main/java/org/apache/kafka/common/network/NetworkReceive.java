@@ -27,8 +27,10 @@ public class NetworkReceive implements Receive {
     public final static int UNLIMITED = -1;
 
     private final String source;
+    //这个size就是读取消息的大小（这个固定是4字节），也就是一条消息前面有4个字节是表示消息长度的
     private final ByteBuffer size;
     private final int maxSize;
+    //这个里面就是读取到的值，也就是响应的buffer
     private ByteBuffer buffer;
 
 
